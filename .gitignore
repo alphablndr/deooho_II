@@ -1,0 +1,18 @@
+.DS_Store
+
+# Arduino / Teensy build output
+build/
+*.elf
+*.hex
+*.eep
+*.lst
+*.map
+*.sym
+
+# Field recordings and temporary WAV saves
+*.WAV
+*.wav
+
+# Local editor state
+.vscode/
+.idea/
