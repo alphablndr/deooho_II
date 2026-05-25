@@ -208,6 +208,12 @@ Noise lessons learned:
 - RAM-first recording removed the ticking.
 - Conclusion: do not write to SD during recording.
 
+## Research Notes
+
+The next artistic/technical direction is documented in:
+
+- [`docs/collective_voice_research.md`](docs/collective_voice_research.md) - research map for the sealed metal cube, internal archive speaker, external surface exciter, and the "collective voice" model.
+
 ## Safety / Wiring Warnings
 
 - Do not connect class-D speaker output `-` to GND.
@@ -222,6 +228,8 @@ Noise lessons learned:
 ```text
 .
 ├── README.md
+├── docs/
+│   └── collective_voice_research.md
 ├── the_ooho_rev1/
 │   └── the_ooho_rev1.ino
 ├── psram_memtest/
