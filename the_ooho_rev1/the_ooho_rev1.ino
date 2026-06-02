@@ -7,12 +7,14 @@
   - Audio Shield LINEOUT_L -> PAM8302 A+
   - Audio Shield GND -> PAM8302 A-
   - PAM8302 speaker output -> 4-8 ohm speaker or surface exciter
-  - Momentary button between pin 32 and GND
+  - Record button between pin 32 and GND
+  - Playback button between pin 30 and GND
   - Optional status LED on pin 31 through 220-1000 ohm resistor to GND
 
   Behavior:
-  - Press button once to start recording W0001.WAV, W0002.WAV, ...
-  - Press again to stop, save WAV, and return to idle
+  - Hold record button to record W0001.WAV, W0002.WAV, ...
+  - Release record button to stop, save WAV, and return to idle
+  - Press playback button to play the latest saved WAV
   - Serial commands: r = record/stop, p = play last, s = stop, t = diagnostic tone
 */
 
@@ -22,7 +24,8 @@
 #include <SPI.h>
 #include <Wire.h>
 
-constexpr int BUTTON_PIN = 32;
+constexpr int RECORD_BUTTON_PIN = 32;
+constexpr int PLAY_BUTTON_PIN = 30;
 constexpr int STATUS_LED_PIN = 31;
 constexpr bool USE_EXTERNAL_STATUS_LED = true;
 constexpr uint32_t DEBOUNCE_MS = 35;
@@ -80,11 +83,21 @@ size_t recordBytesUsed = 0;
 bool recordOverflow = false;
 bool usingPsramBuffer = false;
 
-bool lastRawButton = HIGH;
-bool stableButton = HIGH;
-uint32_t lastButtonChangeMs = 0;
 bool ledOutputState = false;
 uint32_t lastLedChangeMs = 0;
+
+struct DebouncedButton {
+  int pin;
+  const char *name;
+  bool raw = HIGH;
+  bool stable = HIGH;
+  bool pressedEdge = false;
+  bool releasedEdge = false;
+  uint32_t lastChangeMs = 0;
+};
+
+DebouncedButton recordButton{RECORD_BUTTON_PIN, "record"};
+DebouncedButton playButton{PLAY_BUTTON_PIN, "play"};
 
 void writeStatusLed(bool on) {
   ledOutputState = on;
@@ -164,21 +177,38 @@ uint16_t findNextIndex() {
   return 9999;
 }
 
-bool buttonPressedEdge() {
-  const bool raw = digitalRead(BUTTON_PIN);
+uint16_t findLatestIndex() {
+  char name[13];
+  for (int i = 9999; i >= 1; --i) {
+    makeFilename(name, i);
+    if (SD.exists(name)) {
+      return static_cast<uint16_t>(i);
+    }
+  }
+  return 0;
+}
+
+void updateButton(DebouncedButton &button) {
+  button.pressedEdge = false;
+  button.releasedEdge = false;
+
+  const bool raw = digitalRead(button.pin);
   const uint32_t now = millis();
 
-  if (raw != lastRawButton) {
-    lastRawButton = raw;
-    lastButtonChangeMs = now;
+  if (raw != button.raw) {
+    button.raw = raw;
+    button.lastChangeMs = now;
   }
 
-  if ((now - lastButtonChangeMs) > DEBOUNCE_MS && raw != stableButton) {
-    stableButton = raw;
-    return stableButton == LOW;
-  }
+  if ((now - button.lastChangeMs) > DEBOUNCE_MS && raw != button.stable) {
+    button.stable = raw;
+    button.pressedEdge = button.stable == LOW;
+    button.releasedEdge = button.stable == HIGH;
 
-  return false;
+    Serial.print("Button ");
+    Serial.print(button.name);
+    Serial.println(button.pressedEdge ? " pressed" : " released");
+  }
 }
 
 void drainRecordQueue(bool drainAll) {
@@ -375,6 +405,34 @@ void handleTrigger() {
   }
 }
 
+void handleRecordButton() {
+  if (recordButton.pressedEdge && state != RECORDING) {
+    startRecording();
+  }
+
+  if (recordButton.releasedEdge && state == RECORDING) {
+    stopRecording();
+  }
+}
+
+void handlePlayButton() {
+  if (!playButton.pressedEdge) {
+    return;
+  }
+
+  if (state == RECORDING) {
+    Serial.println("Playback button ignored while recording.");
+    return;
+  }
+
+  if (state == SAVING) {
+    Serial.println("Playback button ignored while saving.");
+    return;
+  }
+
+  startPlayback(lastFilename);
+}
+
 void handleSerial() {
   while (Serial.available() > 0) {
     const char command = Serial.read();
@@ -395,7 +453,8 @@ void handleSerial() {
 }
 
 void setup() {
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(RECORD_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(PLAY_BUTTON_PIN, INPUT_PULLUP);
   pinMode(LED_BUILTIN, OUTPUT);
   if (USE_EXTERNAL_STATUS_LED) {
     pinMode(STATUS_LED_PIN, OUTPUT);
@@ -448,15 +507,28 @@ void setup() {
   Serial.print("Ready. Next file: ");
   makeFilename(currentFilename, nextIndex);
   Serial.println(currentFilename);
-  Serial.println("Button: start/stop recording. Serial: r=start/stop, p=play last, s=stop, t=tone test.");
+
+  const uint16_t latestIndex = findLatestIndex();
+  if (latestIndex > 0) {
+    makeFilename(lastFilename, latestIndex);
+    Serial.print("Latest playback file: ");
+    Serial.println(lastFilename);
+  } else {
+    Serial.println("No existing Wxxxx.WAV files found for playback.");
+  }
+
+  Serial.println("Record button pin 32: hold to record, release to save.");
+  Serial.println("Playback button pin 30: press to play latest saved WAV.");
+  Serial.println("Serial: r=start/stop, p=play last, s=stop, t=tone test.");
 }
 
 void loop() {
   handleSerial();
 
-  if (buttonPressedEdge()) {
-    handleTrigger();
-  }
+  updateButton(recordButton);
+  updateButton(playButton);
+  handleRecordButton();
+  handlePlayButton();
 
   if (state == RECORDING) {
     drainRecordQueue(false);

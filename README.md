@@ -2,6 +2,17 @@
 
 Firmware and bench-test sketches for **The Ooho II**, a portable sound-art device shaped as an ear. The device records whispered voice in public space and stores each recording as a local WAV file on microSD. The current firmware is optimized for reliable field recording: audio is captured into PSRAM first, then written to SD only after recording stops.
 
+Current uploaded build: **classic two-button mode** for the old ear retrofit.
+
+```text
+Record button on pin 32:
+  hold = record
+  release = stop + save WAV
+
+Playback button on pin 30:
+  press = play latest Wxxxx.WAV
+```
+
 ## Current Architecture
 
 ```text
@@ -13,7 +24,7 @@ MAX4466 mic preamp
   -> WAV files W0001.WAV, W0002.WAV, ...
 ```
 
-Playback/output tests use:
+Playback/output uses:
 
 ```text
 Audio Shield LINE OUT L/R/G
@@ -32,19 +43,37 @@ Core parts:
 - `APS6404L-3SQR 8 MB PSRAM` soldered to the small PSRAM pads on the underside of Teensy 4.1
 - `Adafruit MAX4466` electret microphone amplifier
 - microSD card in the **built-in Teensy 4.1 SD slot**
-- momentary button
+- record momentary button on pin `32`
+- playback momentary button on pin `30`
 - optional status LED
 - amplifier and speaker / surface transducer
 
-Button and LED:
+Classic two-button wiring:
 
 ```text
-Button contact A -> Teensy pin 32
-Button contact B -> GND
+Record button switch:
+  one side -> Teensy pin 32
+  other side -> GND
+
+Playback button switch:
+  one side -> Teensy pin 30
+  other side -> GND
 
 Teensy pin 31 -> 220-1000 ohm resistor -> LED anode (+)
 LED cathode (-) -> GND
 ```
+
+Use `INPUT_PULLUP` for both buttons. Pressed = `LOW`, released = `HIGH`.
+
+Illuminated button pinout used in the old ear:
+
+```text
+1/2 = one side of the switch
+3/4 = other side of the switch
+5/6 = internal LED
+```
+
+For the switch, use one pin from the `1/2` side and one pin from the `3/4` side. For the LED, use a Teensy output pin through a resistor; if it does not light, swap `5` and `6`.
 
 Microphone:
 
@@ -87,16 +116,17 @@ Do not use `VGND` from the Audio Shield headphone jack as normal ground. For an 
 
 ### `the_ooho_rev1/the_ooho_rev1.ino`
 
-Main firmware for recording.
+Main firmware for recording and latest-file playback.
 
 Behavior:
 
-- Button press starts recording.
+- Record button on pin `32` starts recording while held.
+- Releasing record button stops recording and saves the WAV.
+- Playback button on pin `30` plays the latest saved `Wxxxx.WAV`.
 - LED is on while recording.
-- Second button press stops recording.
 - Audio is saved from PSRAM to SD as `T0001.WAV`, then renamed to `W0001.WAV`.
 - LED is off when idle/saving/playback.
-- No automatic playback after recording in the current build.
+- On boot, firmware scans the SD card and remembers the latest existing `Wxxxx.WAV` for playback.
 
 Serial commands for bench debugging:
 
@@ -138,6 +168,19 @@ Hardware test for the trigger button and status LED.
 button pressed  -> built-in LED and external LED on
 button released -> LEDs off
 ```
+
+### `two_button_test/two_button_test.ino`
+
+Hardware test for two illuminated buttons.
+
+```text
+Button A switch -> pin 32 + GND
+Button B switch -> pin 30 + GND
+Optional LED A  -> pin 31 through resistor
+Optional LED B  -> pin 29 through resistor
+```
+
+The built-in Teensy LED turns on when either button is pressed. The optional external LEDs turn on independently for each button.
 
 ### `tone_button_test/tone_button_test.ino`
 
@@ -213,6 +256,8 @@ Noise lessons learned:
 The next artistic/technical direction is documented in:
 
 - [`docs/collective_voice_research.md`](docs/collective_voice_research.md) - research map for the sealed metal cube, internal archive speaker, external surface exciter, and the "collective voice" model.
+- [`docs/collective_voice_implementation_plan.md`](docs/collective_voice_implementation_plan.md) - implementation plan for Collective Breath + Playback v1.
+- [`docs/project_knowledge.md`](docs/project_knowledge.md) - consolidated current-state notes: hardware, wiring, firmware behavior, risks, and next steps.
 
 ## Safety / Wiring Warnings
 
@@ -229,13 +274,17 @@ The next artistic/technical direction is documented in:
 .
 ├── README.md
 ├── docs/
-│   └── collective_voice_research.md
+│   ├── collective_voice_implementation_plan.md
+│   ├── collective_voice_research.md
+│   └── project_knowledge.md
 ├── the_ooho_rev1/
 │   └── the_ooho_rev1.ino
 ├── psram_memtest/
 │   └── psram_memtest.ino
 ├── button_led_test/
 │   └── button_led_test.ino
+├── two_button_test/
+│   └── two_button_test.ino
 └── tone_button_test/
     └── tone_button_test.ino
 ```
