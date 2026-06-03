@@ -221,6 +221,79 @@ const char MODEL_TEMP_FILE[] = "MODEL.TMP";
 
 extern "C" uint8_t external_psram_size;
 
+// ---------------- Mastering: per-channel EQ (biquads) + soft limiter ----------------
+struct MasterBiquad {
+  float b0 = 1.0f, b1 = 0.0f, b2 = 0.0f, a1 = 0.0f, a2 = 0.0f;
+  float z1 = 0.0f, z2 = 0.0f;  // transposed direct form II state
+  inline float process(float x) {
+    const float y = b0 * x + z1;
+    z1 = b1 * x - a1 * y + z2;
+    z2 = b2 * x - a2 * y;
+    return y;
+  }
+  void setHighpass(float fc, float q) {
+    const float w0 = 2.0f * PI * fc / SAMPLE_RATE;
+    const float c = cosf(w0), s = sinf(w0);
+    const float alpha = s / (2.0f * q);
+    const float a0 = 1.0f + alpha;
+    b0 = (1.0f + c) * 0.5f / a0;
+    b1 = -(1.0f + c) / a0;
+    b2 = (1.0f + c) * 0.5f / a0;
+    a1 = (-2.0f * c) / a0;
+    a2 = (1.0f - alpha) / a0;
+  }
+  void setPeaking(float fc, float q, float dB) {
+    const float A = powf(10.0f, dB / 40.0f);
+    const float w0 = 2.0f * PI * fc / SAMPLE_RATE;
+    const float c = cosf(w0), s = sinf(w0);
+    const float alpha = s / (2.0f * q);
+    const float a0 = 1.0f + alpha / A;
+    b0 = (1.0f + alpha * A) / a0;
+    b1 = (-2.0f * c) / a0;
+    b2 = (1.0f - alpha * A) / a0;
+    a1 = (-2.0f * c) / a0;
+    a2 = (1.0f - alpha / A) / a0;
+  }
+};
+
+class AudioMaster : public AudioStream {
+public:
+  AudioMaster() : AudioStream(1, inputQueueArray) {}
+  MasterBiquad stage[3];
+  uint8_t stages = 0;
+  float ceiling = 0.9f;
+  float limEnv = 0.0f;
+  float limGain = 1.0f;
+  virtual void update(void) {
+    audio_block_t *block = receiveWritable(0);
+    if (!block) {
+      return;
+    }
+    for (int i = 0; i < AUDIO_BLOCK_SAMPLES; ++i) {
+      float x = block->data[i] * (1.0f / 32768.0f);
+      for (uint8_t s = 0; s < stages; ++s) {
+        x = stage[s].process(x);
+      }
+      // Soft limiter: peak-follow gain reduction, fast attack / slow release.
+      const float a = fabsf(x);
+      limEnv += (a - limEnv) * (a > limEnv ? 0.30f : 0.0010f);
+      const float g = limEnv > ceiling ? ceiling / limEnv : 1.0f;
+      limGain += (g - limGain) * (g < limGain ? 0.5f : 0.004f);
+      x *= limGain;
+      if (x > 1.0f) {
+        x = 1.0f;
+      } else if (x < -1.0f) {
+        x = -1.0f;
+      }
+      block->data[i] = static_cast<int16_t>(x * 32767.0f);
+    }
+    transmit(block);
+    release(block);
+  }
+private:
+  audio_block_t *inputQueueArray[1];
+};
+
 AudioInputI2S i2sIn;
 AudioRecordQueue recordQueue;
 AudioPlayQueue logosQueue1;
@@ -232,6 +305,8 @@ AudioSynthWaveform diagnosticTone;
 AudioMixer4 logosMixer;
 AudioMixer4 leftMixer;
 AudioMixer4 rightMixer;
+AudioMaster masterL;   // LOGOS -> internal speaker
+AudioMaster masterR;   // MELOS -> surface exciter
 AudioOutputI2S i2sOut;
 
 AudioConnection patchCord1(i2sIn, 0, recordQueue, 0);
@@ -243,8 +318,10 @@ AudioConnection patchCord6(logosMixer, 0, leftMixer, 0);
 AudioConnection patchCord7(diagnosticTone, 0, leftMixer, 3);
 AudioConnection patchCord8(melosQueue, 0, rightMixer, 0);
 AudioConnection patchCord9(diagnosticTone, 0, rightMixer, 1);
-AudioConnection patchCord10(leftMixer, 0, i2sOut, 0);
-AudioConnection patchCord11(rightMixer, 0, i2sOut, 1);
+AudioConnection patchCord10(leftMixer, 0, masterL, 0);
+AudioConnection patchCord11(rightMixer, 0, masterR, 0);
+AudioConnection patchCord12(masterL, 0, i2sOut, 0);
+AudioConnection patchCord13(masterR, 0, i2sOut, 1);
 AudioControlSGTL5000 audioShield;
 
 enum DeviceState {
@@ -2837,6 +2914,18 @@ void setup() {
   rightMixer.gain(1, 0.8f);  // diagnostic tone
   diagnosticTone.begin(WAVEFORM_SINE);
   diagnosticTone.amplitude(0.0f);
+
+  // Mastering EQ per transducer + soft limiter.
+  // LOGOS -> internal speaker: clear low mud, lift presence for word clarity.
+  masterL.stage[0].setHighpass(90.0f, 0.707f);
+  masterL.stage[1].setPeaking(3000.0f, 1.0f, 2.5f);
+  masterL.stages = 2;
+  masterL.ceiling = 0.92f;
+  // MELOS -> surface exciter: drop useless bass, tame metal harshness 2-5 kHz.
+  masterR.stage[0].setHighpass(175.0f, 0.707f);
+  masterR.stage[1].setPeaking(3500.0f, 1.2f, -3.5f);
+  masterR.stages = 2;
+  masterR.ceiling = 0.88f;
 
   if (USE_MAX4466_LINEIN) {
     audioShield.inputSelect(AUDIO_INPUT_LINEIN);
