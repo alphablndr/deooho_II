@@ -164,6 +164,10 @@ constexpr uint32_t LOGOS_PULSE_JITTER_MS = 120;
 constexpr uint8_t LOGOS_MICRO_STREAM1_PERCENT = 5;
 constexpr uint8_t LOGOS_MICRO_OTHER_PERCENT = 68;
 constexpr uint8_t LOGOS_MUSICAL_RATE_PERCENT = 38;
+// Clear intelligible words are rare: only stream 1 can produce a whole forward
+// word, this often. Every other grain is deconstructed (cloud/micro). Lower to
+// make clear words rarer, raise to make them more frequent.
+constexpr uint8_t LOGOS_WORD_PERCENT = 6;
 constexpr uint8_t LOGOS_MAX_CLOUD_VOICES = 8;
 constexpr uint8_t LOGOS_RECENT_HISTORY = 12;
 constexpr uint8_t LOGOS_CLOUD_STREAM1_PERCENT = 12;
@@ -1995,11 +1999,14 @@ bool startLogosGrain(uint8_t index, const GrainInfo &grain, uint32_t extraOffset
   const uint32_t availableDurationMs = grain.durationMs - extraOffsetMs;
   uint32_t playbackStartMs = availableStartMs;
   uint32_t playbackDurationMs = availableDurationMs;
-  stream.cloud = repeatEligible && availableDurationMs >= LOGOS_MIN_DURATION_MS &&
+  // Rare clear word (stream 1 only). Otherwise every grain is deconstructed, so
+  // intelligible whole words never slip through by accident.
+  const bool clearWord = (index == 0) && (nextRandomU32() % 100UL) < LOGOS_WORD_PERCENT;
+  stream.cloud = !clearWord && repeatEligible && availableDurationMs >= LOGOS_MIN_DURATION_MS &&
                  (nextRandomU32() % 100UL) < logosCloudChance(index);
   stream.granular = stream.cloud;
-  if (!stream.cloud && playbackDurationMs > LOGOS_MICRO_MIN_MS &&
-      (nextRandomU32() % 100UL) < logosMicroChance(index)) {
+  if (!clearWord && !stream.cloud && playbackDurationMs > LOGOS_MICRO_MIN_MS) {
+    // not a clear word -> force a short fragment, never an intelligible whole grain
     const uint32_t maxMicroMs = LOGOS_MICRO_MAX_MS < playbackDurationMs ? LOGOS_MICRO_MAX_MS : playbackDurationMs;
     uint32_t microDurationMs = randomRangeMs(LOGOS_MICRO_MIN_MS, maxMicroMs);
     const uint32_t maxOffsetMs = playbackDurationMs - microDurationMs;
@@ -2141,6 +2148,14 @@ bool startLogosGrain(uint8_t index, const GrainInfo &grain, uint32_t extraOffset
         }
         stream.voiceCount++;
       }
+    }
+  } else if (clearWord) {
+    // intelligible: whole grain, forward, normal speed
+    stream.reversed = false;
+    stream.rate = 1.0f;
+    outputTotal = setupLogosVoice(stream, 0, 0, loaded, 0, stream.rate, stream.reversed);
+    if (outputTotal > 0) {
+      stream.voiceCount = 1;
     }
   } else {
     const uint8_t reverseChance = index == 0 ? 18 : (index == 1 ? 58 : (index == 2 ? 40 : 32));
