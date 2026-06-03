@@ -76,6 +76,12 @@ Per-window RMS is precomputed into `logosWindowRms[LOGOS_MAX_WINDOWS]`. Tunables
 planned step (not done): per-grain brightness/voiced tags in `GRAINS.CSV` so
 playback can route grains to matching stream roles.
 
+**Archive re-slice (serial `x`):** `rebuildGrainsFromArchive()` re-runs the
+current detector over every `Wxxxx.WAV` and rewrites `GRAINS.CSV` from scratch
+(via `loadWavIntoRecordBuffer`). New slicing only affects newly recorded voices
+otherwise, so run `x` once after changing the detector to migrate the whole
+archive. Playback is stopped during the rebuild; MELOS keeps humming (no SD).
+
 ## Model Change
 
 `MODEL_VERSION` bumped to **2** (added `float meanLogF0Sq` after `meanLogF0`).

@@ -2587,6 +2587,85 @@ void stopRecording() {
   grainCount = countGrains();
 }
 
+bool loadWavIntoRecordBuffer(const char *filename) {
+  FsFile file = SD.sdfs.open(filename, O_RDONLY);
+  if (!file) {
+    return false;
+  }
+  const uint32_t fileBytes = file.size();
+  if (fileBytes <= 44) {
+    file.close();
+    return false;
+  }
+  uint32_t dataBytes = fileBytes - 44;
+  if (dataBytes > activeRecordCapacity) {
+    dataBytes = activeRecordCapacity;
+  }
+  if (!file.seekSet(44)) {
+    file.close();
+    return false;
+  }
+  uint32_t readTotal = 0;
+  while (readTotal < dataBytes) {
+    const uint32_t chunk = min(static_cast<uint32_t>(SD_WRITE_CHUNK_BYTES), dataBytes - readTotal);
+    const int got = file.read(activeRecordBuffer + readTotal, chunk);
+    if (got <= 0) {
+      break;
+    }
+    readTotal += static_cast<uint32_t>(got);
+    workTick();
+  }
+  file.close();
+  recordBytesUsed = readTotal;
+  return readTotal > 0;
+}
+
+// One-off: re-slice every archived Wxxxx.WAV with the current grain detector and
+// rewrite GRAINS.CSV from scratch. Triggered by serial 'x'.
+void rebuildGrainsFromArchive() {
+  if (state != IDLE) {
+    Serial.println("Rebuild ignored (busy).");
+    return;
+  }
+  Serial.println("Rebuilding GRAINS.CSV from archive...");
+  stopAllPlayback();
+  enterState(PROCESSING);
+  if (SD.exists(GRAINS_FILE)) {
+    SD.remove(GRAINS_FILE);
+  }
+  grainCount = 0;
+
+  uint32_t filesDone = 0;
+  uint32_t misses = 0;
+  char name[13];
+  for (uint16_t i = 1; i < 10000 && misses < 60; ++i) {
+    makeFilename(name, i);
+    if (!SD.exists(name)) {
+      misses++;
+      continue;
+    }
+    misses = 0;
+    if (!loadWavIntoRecordBuffer(name)) {
+      Serial.print("Skip ");
+      Serial.println(name);
+      continue;
+    }
+    strncpy(currentFilename, name, sizeof(currentFilename));
+    currentFilename[sizeof(currentFilename) - 1] = '\0';
+    appendLogosGrains();  // appends grains for this file to GRAINS.CSV
+    filesDone++;
+    workTick();
+  }
+
+  grainCount = countGrains();
+  Serial.print("Rebuild done: files=");
+  Serial.print(filesDone);
+  Serial.print(", grains=");
+  Serial.println(grainCount);
+  initializeLogosSchedulers();
+  enterState(IDLE);
+}
+
 void handleSerial() {
   while (Serial.available() > 0) {
     const char command = Serial.read();
@@ -2616,6 +2695,8 @@ void handleSerial() {
       playOneLogosNow();
     } else if (command == 'e' || command == 'E') {
       Serial.println("MELOS is live-synthesized; nothing to render.");
+    } else if (command == 'x' || command == 'X') {
+      rebuildGrainsFromArchive();
     }
   }
 }
@@ -2720,7 +2801,7 @@ void setup() {
   Serial.print("LOGOS grains: ");
   Serial.println(grainCount);
   Serial.println("Record button pin 32: hold to record, release to process.");
-  Serial.println("Serial: r=record toggle, s=stop, t=tone, m=model, g=grains, n=LOGOS now, e=(no render).");
+  Serial.println("Serial: r=record toggle, s=stop, t=tone, m=model, g=grains, n=LOGOS now, e=(no render), x=rebuild grains.");
   Serial.println("MELOS is real-time synthesized; LOGOS is a 4-stream PSRAM crowd with reverse/rate.");
 
   enterState(IDLE);
