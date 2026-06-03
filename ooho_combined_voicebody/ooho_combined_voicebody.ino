@@ -1783,8 +1783,8 @@ float melosNextSample() {
   const float envFrac = envPos - floorf(envPos);
   const float envVal = melosSmoothedEnv[envBin] * (1.0f - envFrac) + melosSmoothedEnv[envBinNext] * envFrac;
   const float envShape = 0.7f + 0.3f * envVal;
-  const float duck = constrain(1.0f - melosLogosEnvelope * MELOS_SIDECHAIN_DUCK, 0.56f, 1.0f);
-  const float amp = melosBreathArc * envShape * duck;
+  // Sidechain ducking removed: MELOS amplitude no longer pumps with LOGOS.
+  const float amp = melosBreathArc * envShape;
 
   melosSampleCounter++;
   return softClip(formantOut * amp * MELOS_GAIN * MELOS_MAKEUP);
