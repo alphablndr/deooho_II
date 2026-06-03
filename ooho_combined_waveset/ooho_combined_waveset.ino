@@ -87,6 +87,9 @@ constexpr float LOGOS_COMP_RATIO = 3.0f;
 constexpr float LOGOS_COMP_MAKEUP = 1.30f;
 constexpr uint32_t LOGOS_FADE_MS = 24;
 constexpr uint32_t AUDIO_FEED_MIN_US = 2300;
+// Ease the density-mode bus gain so sparse/present/swarm changes don't step
+// the LOGOS level (that step was an audible click every 18-56 s).
+constexpr float LOGOS_DENSITY_GAIN_EASE = 1.0f / (0.18f * SAMPLE_RATE);  // ~180 ms
 
 // MELOS live synthesis
 constexpr float MELOS_PARAM_EASE = 1.0f / (4.0f * SAMPLE_RATE);   // ~4 s ease toward model
@@ -305,6 +308,7 @@ uint8_t recentGrainWrite = 0;
 uint8_t recentGrainUsed = 0;
 uint8_t logosDensityMode = LOGOS_MODE_PRESENT;
 uint32_t logosDensitySwitchMs = 0;
+float logosDensityGainCur = 1.0f;  // smoothed bus gain, eased toward the mode target
 
 char currentFilename[13] = "W0000.WAV";
 char tempFilename[13] = "T0000.WAV";
@@ -2260,7 +2264,8 @@ void feedLogosQueue(uint8_t index) {
           }
         }
         const float cloudNorm = stream.voiceCount > 1 ? (1.0f + 0.18f * static_cast<float>(stream.voiceCount - 1)) : 1.0f;
-        const float logosOut = compressLogos(sample * (LOGOS_STREAM_GAIN * logosDensityGain() / cloudNorm));
+        logosDensityGainCur += (logosDensityGain() - logosDensityGainCur) * LOGOS_DENSITY_GAIN_EASE;
+        const float logosOut = compressLogos(sample * (LOGOS_STREAM_GAIN * logosDensityGainCur / cloudNorm));
         followLogosEnvelope(logosOut);
         buffer[i] = floatToInt16(logosOut);
 
