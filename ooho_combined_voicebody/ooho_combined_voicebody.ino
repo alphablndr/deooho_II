@@ -87,6 +87,7 @@ constexpr float LOGOS_COMP_RATIO = 3.0f;
 constexpr float LOGOS_COMP_MAKEUP = 1.30f;
 constexpr uint32_t LOGOS_FADE_MS = 24;
 constexpr uint32_t AUDIO_FEED_MIN_US = 2300;
+constexpr float DC_BLOCK_R = 0.9995f;  // one-pole DC blocker, ~3.5 Hz cutoff
 // Ease the density-mode bus gain so sparse/present/swarm changes don't step
 // the LOGOS level (that step was an audible click every 18-56 s).
 constexpr float LOGOS_DENSITY_GAIN_EASE = 1.0f / (0.18f * SAMPLE_RATE);  // ~180 ms
@@ -291,6 +292,8 @@ struct LogosStream {
   AudioPlayQueue *queue;
   int16_t *buffer = nullptr;     // PSRAM grain buffer
   uint32_t bufferSamples = 0;    // valid source samples in buffer
+  float dcX1 = 0.0f;             // per-stream DC blocker state
+  float dcY1 = 0.0f;
   bool granular = false;
   bool cloud = false;
   uint8_t cloudPattern = 0;
@@ -408,6 +411,8 @@ float melosAspiration = 0.2f;                     // noise amount
 float melosBreathArc = 0.4f;                      // breathing amplitude
 float melosBreathArcTarget = 0.6f;
 uint32_t melosBreathNextSample = 0;
+float melosDcX1 = 0.0f;                            // MELOS DC blocker state
+float melosDcY1 = 0.0f;
 
 bool diagnosticToneOn = false;
 uint32_t lastLedToggleMs = 0;
@@ -1858,7 +1863,12 @@ float melosNextSample() {
   const float amp = melosBreathArc * envShape;
 
   melosSampleCounter++;
-  return softClip(formantOut * amp * MELOS_GAIN * MELOS_MAKEUP);
+  const float melosOut = softClip(formantOut * amp * MELOS_GAIN * MELOS_MAKEUP);
+  // DC blocker (belt-and-suspenders; the formant bandpass already removes DC).
+  const float melosDc = melosOut - melosDcX1 + DC_BLOCK_R * melosDcY1;
+  melosDcX1 = melosOut;
+  melosDcY1 = melosDc;
+  return melosDc;
 }
 
 void feedMelosQueue() {
@@ -2365,8 +2375,12 @@ void feedLogosQueue(uint8_t index) {
         const float cloudNorm = stream.voiceCount > 1 ? (1.0f + 0.18f * static_cast<float>(stream.voiceCount - 1)) : 1.0f;
         logosDensityGainCur += (logosDensityGain() - logosDensityGainCur) * LOGOS_DENSITY_GAIN_EASE;
         const float logosOut = compressLogos(sample * (LOGOS_STREAM_GAIN * logosDensityGainCur / cloudNorm));
-        followLogosEnvelope(logosOut);
-        buffer[i] = floatToInt16(logosOut);
+        // DC blocker (recordings carry DC since the ADC high-pass is disabled).
+        const float logosDc = logosOut - stream.dcX1 + DC_BLOCK_R * stream.dcY1;
+        stream.dcX1 = logosOut;
+        stream.dcY1 = logosDc;
+        followLogosEnvelope(logosDc);
+        buffer[i] = floatToInt16(logosDc);
 
         if (stream.samplesRemaining > 0) {
           stream.samplesRemaining--;
