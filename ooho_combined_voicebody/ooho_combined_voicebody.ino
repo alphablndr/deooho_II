@@ -167,7 +167,7 @@ constexpr uint8_t LOGOS_MUSICAL_RATE_PERCENT = 38;
 // Clear intelligible words are rare: only stream 1 can produce a whole forward
 // word, this often. Every other grain is deconstructed (cloud/micro). Lower to
 // make clear words rarer, raise to make them more frequent.
-constexpr uint8_t LOGOS_WORD_PERCENT = 6;
+constexpr uint8_t LOGOS_WORD_PERCENT = 25;
 constexpr uint8_t LOGOS_MAX_CLOUD_VOICES = 8;
 constexpr uint8_t LOGOS_RECENT_HISTORY = 12;
 constexpr uint8_t LOGOS_CLOUD_STREAM1_PERCENT = 12;
