@@ -164,9 +164,8 @@ constexpr uint32_t LOGOS_PULSE_JITTER_MS = 120;
 constexpr uint8_t LOGOS_MICRO_STREAM1_PERCENT = 5;
 constexpr uint8_t LOGOS_MICRO_OTHER_PERCENT = 68;
 constexpr uint8_t LOGOS_MUSICAL_RATE_PERCENT = 38;
-// Clear intelligible words are rare: only stream 1 can produce a whole forward
-// word, this often. Every other grain is deconstructed (cloud/micro). Lower to
-// make clear words rarer, raise to make them more frequent.
+// Chance any grain (any stream) plays as a whole forward intelligible word;
+// every other grain is deconstructed (cloud/micro). Raise for more words.
 constexpr uint8_t LOGOS_WORD_PERCENT = 25;
 constexpr uint8_t LOGOS_MAX_CLOUD_VOICES = 8;
 constexpr uint8_t LOGOS_RECENT_HISTORY = 12;
@@ -2001,7 +2000,7 @@ bool startLogosGrain(uint8_t index, const GrainInfo &grain, uint32_t extraOffset
   uint32_t playbackDurationMs = availableDurationMs;
   // Rare clear word (stream 1 only). Otherwise every grain is deconstructed, so
   // intelligible whole words never slip through by accident.
-  const bool clearWord = (index == 0) && (nextRandomU32() % 100UL) < LOGOS_WORD_PERCENT;
+  const bool clearWord = (nextRandomU32() % 100UL) < LOGOS_WORD_PERCENT;
   stream.cloud = !clearWord && repeatEligible && availableDurationMs >= LOGOS_MIN_DURATION_MS &&
                  (nextRandomU32() % 100UL) < logosCloudChance(index);
   stream.granular = stream.cloud;
