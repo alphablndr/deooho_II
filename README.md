@@ -141,6 +141,7 @@ logos_one_stream_test -> verify manual LOGOS grain playback
 melos_short_test  -> verify short MELOS render/playback
 ooho_combined_test -> current stable integrated Stage 8 baseline
 ooho_combined_emergent -> Claude Code branch: live MELOS synth + 4-stream LOGOS crowd
+ooho_combined_voicebody -> MELOS rebuilt as a collective vocal body (source-formant-filter)
 the_ooho_rev1     -> full experimental field firmware
 ```
 
@@ -168,6 +169,23 @@ MELOS_SECONDS = 30
 ```
 
 Keep this short value until the whole pipeline is reliable. The intended field value is 480 seconds, but that creates a large WAV and slows every processing pass.
+
+### `ooho_combined_voicebody/ooho_combined_voicebody.ino`
+
+Forked from the waveset build. MELOS (right channel) is rebuilt as a **collective
+vocal body** (design: [`docs/superpowers/specs/2026-06-03-melos-collective-voice-body-design.md`](docs/superpowers/specs/2026-06-03-melos-collective-voice-body-design.md)).
+The LOGOS left channel is unchanged.
+
+- **Source–formant-filter engine**, not additive partials: 6 glottal sources →
+  one shared 3-formant "mouth" (TPT state-variable bandpass), vowel oo/aa/ee from
+  `model.bands`, tone↔breath from `voicedRatio`.
+- **Unison swarm → archive-bloomed cluster:** voices sit near one collective
+  pitch (`meanLogF0`); harmonic width tracks the archive's F0 spread (new model
+  stat `meanLogF0Sq`), with a ~20% pull toward unison/octave/fifth.
+- **Breathing** amplitude arcs instead of a sustained pad; post-recording "chew"
+  gesture; LOGOS events open/aerate/stabilize the body (coupling reused).
+- `MODEL.BIN` version bumped to 2; an older model reinitializes (pitch spread
+  restarts at 0) while the recording archive and `GRAINS.CSV` are untouched.
 
 ### `ooho_combined_emergent/ooho_combined_emergent.ino`
 
@@ -445,6 +463,8 @@ The next artistic/technical direction is documented in:
 │   └── ooho_combined_test.ino
 ├── ooho_combined_emergent/
 │   └── ooho_combined_emergent.ino
+├── ooho_combined_voicebody/
+│   └── ooho_combined_voicebody.ino
 ├── record_raw_test/
 │   └── record_raw_test.ino
 ├── logos_one_stream_test/
