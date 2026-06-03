@@ -1,19 +1,27 @@
 # The Ooho II - Teensy 4.1 Firmware
 
-Firmware and bench-test sketches for **The Ooho II**, a portable sound-art device shaped as an ear. The device records whispered voice in public space and stores each recording as a local WAV file on microSD. The current firmware is optimized for reliable field recording: audio is captured into PSRAM first, then written to SD only after recording stops.
+Firmware and bench-test sketches for **The Ooho II**, a portable sound-art device shaped as an ear. The device records whispered voice in public space and stores each recording as a local WAV file on microSD. The firmware direction is optimized for reliable field recording: audio is captured into PSRAM first, then written to SD only after recording stops.
 
-Current uploaded build: **classic two-button mode** for the old ear retrofit.
+Current practical workflow: **incremental bring-up builds**. Do not debug the full LOGOS/MELOS firmware until the simple hardware layers pass.
+
+Current stable integrated lab build:
+
+```text
+ooho_combined_test
+```
+
+This is the Stage 8 baseline. It records, saves WAV, updates `GRAINS.CSV`/`MODEL.BIN`, plays one LOGOS stream on the left, and plays MELOS v2 soft on the right. It keeps playback running during recording. MELOS re-render is currently deferred while playback is active, because same-card render/playback caused crunch and rhythmic modulation.
+
+Latest confirmed hardware fact:
 
 ```text
 Record button on pin 32:
-  hold = record
-  release = stop + save WAV
-
-Playback button on pin 30:
-  press = play latest Wxxxx.WAV
+  pressed = LOW
+  released = HIGH
+  verified by pin_scan_test/button_led_test
 ```
 
-## Current Architecture
+## Current Architecture Direction
 
 ```text
 MAX4466 mic preamp
@@ -24,12 +32,12 @@ MAX4466 mic preamp
   -> WAV files W0001.WAV, W0002.WAV, ...
 ```
 
-Playback/output uses:
+Final playback/output direction:
 
 ```text
-Audio Shield LINE OUT L/R/G
-  -> mono amp or stereo amp
-  -> speaker / surface transducer
+Audio Shield LINE OUT L -> internal speaker       -> LOGOS real word grains
+Audio Shield LINE OUT R -> surface exciter / cube -> MELOS synthesized collective voice
+Audio Shield LINE OUT G -> amplifier ground / sleeve
 ```
 
 The important design decision is **RAM-first recording**. Earlier live-SD recording produced regular ticking clicks in the recorded WAV. A RAM-only test was clean, which confirmed that SD writes during recording were contaminating the analog input path. With PSRAM installed, SD writes happen only after recording stops.
@@ -43,17 +51,20 @@ Core parts:
 - `APS6404L-3SQR 8 MB PSRAM` soldered to the small PSRAM pads on the underside of Teensy 4.1
 - `Adafruit MAX4466` electret microphone amplifier
 - microSD card in the **built-in Teensy 4.1 SD slot**
-- record momentary button on pin `32`
-- playback momentary button on pin `30`
+- public record momentary button on pin `32`
+- optional bench/debug playback button on pin `30` in old test sketches only
 - optional status LED
 - amplifier and speaker / surface transducer
 
-Classic two-button wiring:
+Current one-button wiring:
 
 ```text
 Record button switch:
   one side -> Teensy pin 32
   other side -> GND
+```
+
+Old two-button/bench wiring:
 
 Playback button switch:
   one side -> Teensy pin 30
@@ -63,7 +74,7 @@ Teensy pin 31 -> 220-1000 ohm resistor -> LED anode (+)
 LED cathode (-) -> GND
 ```
 
-Use `INPUT_PULLUP` for both buttons. Pressed = `LOW`, released = `HIGH`.
+Use `INPUT_PULLUP` for buttons. Pressed = `LOW`, released = `HIGH`.
 
 Illuminated button pinout used in the old ear:
 
@@ -114,35 +125,141 @@ Do not use `VGND` from the Audio Shield headphone jack as normal ground. For an 
 
 ## Firmware Sketches
 
+### Recommended Bring-Up Order
+
+See [`docs/bringup_pipeline.md`](docs/bringup_pipeline.md) for the full checklist.
+
+Use this order:
+
+```text
+button_led_test   -> verify pin 32 button
+tone_button_test  -> verify Audio Shield output / amp / speaker
+sd_smoke_test     -> verify built-in Teensy SD slot
+psram_memtest     -> verify soldered PSRAM
+record_raw_test   -> verify PSRAM-first recording, WAV save, serial playback, GRAINS.CSV
+logos_one_stream_test -> verify manual LOGOS grain playback
+melos_short_test  -> verify short MELOS render/playback
+ooho_combined_test -> current stable integrated Stage 8 baseline
+ooho_combined_emergent -> Claude Code branch: live MELOS synth + 4-stream LOGOS crowd
+the_ooho_rev1     -> full experimental field firmware
+```
+
+The safest recording-only debug build is `record_raw_test`, because it records and saves real WAV files without MELOS/model/idle complexity. The safest integrated artistic debug build is currently `ooho_combined_test`.
+
 ### `the_ooho_rev1/the_ooho_rev1.ino`
 
-Main firmware for recording and latest-file playback.
+Full experimental LOGOS/MELOS firmware. This is the final artistic direction, not the first sketch to use during hardware bring-up.
 
 Behavior:
 
-- Record button on pin `32` starts recording while held.
-- Releasing record button stops recording and saves the WAV.
-- Playback button on pin `30` plays the latest saved `Wxxxx.WAV`.
-- LED is on while recording.
-- Audio is saved from PSRAM to SD as `T0001.WAV`, then renamed to `W0001.WAV`.
-- LED is off when idle/saving/playback.
-- On boot, firmware scans the SD card and remembers the latest existing `Wxxxx.WAV` for playback.
+- Record button on pin `32`: hold to record, release to process.
+- Max record time: 30 seconds.
+- Recording is PSRAM-first; SD writes happen only after release.
+- Saves raw archive files as `Wxxxx.WAV`.
+- Appends LOGOS word candidates to `GRAINS.CSV`.
+- Updates `MODEL.BIN`.
+- Renders `MELOS.WAV`.
+- In idle, plays LOGOS grains on the left channel and MELOS on the right channel.
+
+Current debug setting:
+
+```text
+MELOS_SECONDS = 30
+```
+
+Keep this short value until the whole pipeline is reliable. The intended field value is 480 seconds, but that creates a large WAV and slows every processing pass.
+
+### `ooho_combined_emergent/ooho_combined_emergent.ino`
+
+Claude Code branch of the build, forked from `ooho_combined_test` (the stable
+build, left untouched). Primary development of this project is done in Codex;
+this build was made with Claude Code. Design spec:
+[`docs/superpowers/specs/2026-06-03-ooho-combined-emergent-design.md`](docs/superpowers/specs/2026-06-03-ooho-combined-emergent-design.md).
+
+Differences from `ooho_combined_test`:
+
+- LOGOS (left): up to 4 overlapping streams (a crowd), denser scheduling
+  (`0.5-6 s` active interval), ~30% reversed grains, ~20% rate-shifted grains
+  (`0.70x` slower / `1.40x` faster), longer `40 ms` fades. Grains are loaded
+  into PSRAM and played from RAM, so LOGOS no longer streams from SD.
+- MELOS (right): real-time generative synthesis instead of a rendered
+  `MELOS.WAV`. Harmonic partials of F0 + breath, colored by the model bands.
+  The synth eases toward the model over a few seconds, so the collective voice
+  drifts slowly and continuously with no loop seam, no render pause, no crunch.
+  There is no MELOS file and no render step.
+- Mixer routing: `logosQueue1..4 -> logosMixer -> leftMixer.0`; the diagnostic
+  tone stays on `leftMixer.3` (an `AudioMixer4` has only 4 inputs).
+
+Serial: same as `ooho_combined_test`, except `e` is a no-op (nothing to render).
+Next step (not in this build): a live granular synthesis path for LOGOS.
+
+### `ooho_combined_test/ooho_combined_test.ino`
+
+Current stable Stage 8 lab build.
+
+Behavior:
+
+- hold pin `32` to record;
+- release to process;
+- recording writes only to PSRAM during capture;
+- raw WAV is saved after release;
+- `GRAINS.CSV` and `MODEL.BIN` update after release;
+- playback continues during recording;
+- one LOGOS stream plays real grains on left;
+- MELOS v2 soft plays on right;
+- MELOS render is deferred while playback is active.
+
+Important note:
+
+Same-card `MNEXT.WAV` double-buffer/crossfade was tested and disabled. It produced crunch and rhythmic modulation when rendering while playing from the same SD card. Do not re-enable casually.
 
 Serial commands for bench debugging:
 
 ```text
 r  start/stop recording
-p  play last saved WAV
-s  stop playback
+p  only available in record_raw_test for latest full WAV playback
+s  stop playback or recording
 t  diagnostic tone
+m  print model summary
+g  print grain/LOGOS status
 ```
 
 Memory behavior:
 
-- With PSRAM detected: up to 60 seconds at 44.1 kHz mono 16-bit.
+- With PSRAM detected: 30 seconds at 44.1 kHz mono 16-bit in current field/test builds.
 - Without PSRAM: 3 second internal RAM fallback.
-- `AudioMemory(200)` provides extra queue slack.
 - Global Teensy `AUDIO_BLOCK_SAMPLES` is not modified.
+
+### `record_raw_test/record_raw_test.ino`
+
+Record-only bring-up sketch.
+
+Behavior:
+
+- Hold pin `32` = record to PSRAM/RAM only.
+- Release = save `Wxxxx.WAV`.
+- Max record time = 30 seconds.
+- Appends LOGOS grain candidates to `GRAINS.CSV`.
+- Serial `p` plays the latest full WAV.
+- Serial `s` stops playback or recording.
+- No MELOS, no model, no idle playback.
+
+Use this sketch before the full artistic firmware.
+
+### `sd_smoke_test/sd_smoke_test.ino`
+
+Built-in SD slot test.
+
+Behavior:
+
+```text
+SD.begin(BUILTIN_SDCARD)
+write TEST.TXT
+read TEST.TXT
+delete TEST.TXT
+```
+
+LED stays on when the test passes and blinks fast on failure.
 
 ### `psram_memtest/psram_memtest.ino`
 
@@ -193,6 +310,36 @@ button released -> silence
 
 This is useful for testing speakers, exciters, amplifier gain, resonance, and mechanical mounting without SD or microphone recording.
 
+### `pin_scan_test/pin_scan_test.ino`
+
+Temporary hardware finder for button wiring.
+
+It scans pins `28`, `29`, `30`, `32`, and `33` using `INPUT_PULLUP`.
+
+This confirmed that the current record button is on pin `32`.
+
+### `logos_one_stream_test/logos_one_stream_test.ino`
+
+Manual LOGOS playback test.
+
+```text
+reads GRAINS.CSV
+opens Wxxxx.WAV
+manual seek into WAV data
+AudioPlayQueue -> left channel
+button pin 32 / Serial n = one grain now
+```
+
+### `melos_short_test/melos_short_test.ino`
+
+Short MELOS render/playback test.
+
+```text
+loads MODEL.BIN or default model
+renders MELOS.WAV at MELOS_SECONDS = 30
+manual FsFile + AudioPlayQueue -> right channel
+```
+
 ## Arduino / Teensyduino Settings
 
 Use Arduino IDE with Teensyduino installed.
@@ -227,6 +374,13 @@ Upload example:
 arduino-cli upload -p usb:2132000 --fqbn teensy:avr:teensy41 the_ooho_rev1
 ```
 
+Local Arduino CLI path used during bring-up on this machine:
+
+```sh
+'/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/arduino-cli' compile --fqbn teensy:avr:teensy41 record_raw_test
+'/Applications/Arduino IDE.app/Contents/Resources/app/lib/backend/resources/arduino-cli' upload -p usb:132000 --fqbn teensy:avr:teensy41 record_raw_test
+```
+
 If upload fails with `Unable find Teensy Loader`, open the Teensy Loader app from the local Teensy package and repeat upload.
 
 ## Field Notes
@@ -239,6 +393,10 @@ Use short filenames:
 W0001.WAV
 W0002.WAV
 T0001.WAV temporary while saving
+GRAINS.CSV
+MODEL.BIN
+MELOS.WAV
+MNEXT.WAV experimental next MELOS render, disabled in stable build
 ```
 
 The SD card should be formatted FAT32 for first field tests. Endurance cards are preferred for repeated writes.
@@ -250,13 +408,16 @@ Noise lessons learned:
 - Powerbank recording did not remove the ticking.
 - RAM-first recording removed the ticking.
 - Conclusion: do not write to SD during recording.
+- Same-card MELOS render while playback continues can produce crunch/modulation.
+- `AUDIO_FEED_MIN_US = 2300` is a known-good queue feed interval in `ooho_combined_test`; a slower `3200 us` caused rhythmic modulation.
 
 ## Research Notes
 
 The next artistic/technical direction is documented in:
 
 - [`docs/collective_voice_research.md`](docs/collective_voice_research.md) - research map for the sealed metal cube, internal archive speaker, external surface exciter, and the "collective voice" model.
-- [`docs/collective_voice_implementation_plan.md`](docs/collective_voice_implementation_plan.md) - implementation plan for Collective Breath + Playback v1.
+- [`docs/collective_voice_implementation_plan.md`](docs/collective_voice_implementation_plan.md) - implementation plan for LOGOS/MELOS Field v1.
+- [`docs/bringup_pipeline.md`](docs/bringup_pipeline.md) - incremental hardware and firmware bring-up sequence.
 - [`docs/project_knowledge.md`](docs/project_knowledge.md) - consolidated current-state notes: hardware, wiring, firmware behavior, risks, and next steps.
 
 ## Safety / Wiring Warnings
@@ -276,13 +437,28 @@ The next artistic/technical direction is documented in:
 ├── docs/
 │   ├── collective_voice_implementation_plan.md
 │   ├── collective_voice_research.md
+│   ├── bringup_pipeline.md
 │   └── project_knowledge.md
 ├── the_ooho_rev1/
 │   └── the_ooho_rev1.ino
+├── ooho_combined_test/
+│   └── ooho_combined_test.ino
+├── ooho_combined_emergent/
+│   └── ooho_combined_emergent.ino
+├── record_raw_test/
+│   └── record_raw_test.ino
+├── logos_one_stream_test/
+│   └── logos_one_stream_test.ino
+├── melos_short_test/
+│   └── melos_short_test.ino
+├── sd_smoke_test/
+│   └── sd_smoke_test.ino
 ├── psram_memtest/
 │   └── psram_memtest.ino
 ├── button_led_test/
 │   └── button_led_test.ino
+├── pin_scan_test/
+│   └── pin_scan_test.ino
 ├── two_button_test/
 │   └── two_button_test.ino
 └── tone_button_test/
