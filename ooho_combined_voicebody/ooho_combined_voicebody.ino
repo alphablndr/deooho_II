@@ -80,7 +80,7 @@ constexpr float DEFAULT_F0_HZ = 160.0f;
 constexpr float DEFAULT_VOICED_RATIO = 0.5f;
 constexpr float DEFAULT_RMS = 0.08f;
 
-constexpr float MELOS_GAIN = 0.525f;          // +25% from close-LOGOS balance
+constexpr float MELOS_GAIN = 0.27f;           // quieter body, ~half of the old level
 constexpr float LOGOS_STREAM_GAIN = 0.60f;    // +25%, then compressed below
 constexpr float LOGOS_COMP_THRESHOLD = 0.18f;
 constexpr float LOGOS_COMP_RATIO = 3.0f;
@@ -110,7 +110,7 @@ constexpr float MELOS_VOWEL_EASE = 1.0f / (3.0f * SAMPLE_RATE);   // ~3 s vowel/
 constexpr float MELOS_F0_EASE = 1.0f / (4.0f * SAMPLE_RATE);      // ~4 s pitch center ease
 constexpr uint32_t MELOS_BREATH_MIN_MS = 4000;
 constexpr uint32_t MELOS_BREATH_MAX_MS = 8000;
-constexpr float MELOS_BREATH_EASE = 1.0f / (3.0f * SAMPLE_RATE);  // ~3 s glide, no steps
+constexpr float MELOS_BREATH_EASE = 1.0f / (5.0f * SAMPLE_RATE);  // ~5 s glide, very smooth
 constexpr float MELOS_MAKEUP = 2.2f;               // post-formant makeup before soft clip
 constexpr uint32_t MELOS_MODE_MIN_MS = 20000;
 constexpr uint32_t MELOS_MODE_MAX_MS = 90000;
@@ -1753,11 +1753,10 @@ void melosBlockUpdate() {
   const float aspTarget = constrain((1.0f - melosTenseness) * 0.7f + melosLogosDensity * 0.5f + constr * 0.5f + melosLearnBreath * melosLearnAmount * 0.6f, 0.0f, 1.5f);
   melosAspiration += (aspTarget - melosAspiration) * (MELOS_PARAM_EASE * blk);
 
-  // Breathing arc (occasional deep inhale near silence).
+  // Breathing arc: gentle, narrow range, no near-silence dips.
   if (melosSampleCounter >= melosBreathNextSample) {
-    const float r = static_cast<float>(nextRandomU32() & 0xFFFFUL) / 65535.0f;
     const float r2 = static_cast<float>(nextRandomU32() & 0xFFFFUL) / 65535.0f;
-    melosBreathArcTarget = r < 0.18f ? 0.06f : (0.45f + 0.55f * r2);
+    melosBreathArcTarget = 0.66f + 0.2f * r2;  // ~0.66..0.86
     melosBreathNextSample = melosSampleCounter + melosRandomSamples(MELOS_BREATH_MIN_MS, MELOS_BREATH_MAX_MS);
   }
   melosBreathArc += (melosBreathArcTarget - melosBreathArc) * (MELOS_BREATH_EASE * blk);
@@ -1854,7 +1853,7 @@ float melosNextSample() {
   const uint8_t envBinNext = (envBin + 1) % ENV_BINS;
   const float envFrac = envPos - floorf(envPos);
   const float envVal = melosSmoothedEnv[envBin] * (1.0f - envFrac) + melosSmoothedEnv[envBinNext] * envFrac;
-  const float envShape = 0.7f + 0.3f * envVal;
+  const float envShape = 0.85f + 0.15f * envVal;  // less amplitude movement
   // Sidechain ducking removed: MELOS amplitude no longer pumps with LOGOS.
   const float amp = melosBreathArc * envShape;
 
