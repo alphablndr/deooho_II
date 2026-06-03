@@ -182,10 +182,17 @@ The LOGOS left channel is unchanged.
 - **Unison swarm → archive-bloomed cluster:** voices sit near one collective
   pitch (`meanLogF0`); harmonic width tracks the archive's F0 spread (new model
   stat `meanLogF0Sq`), with a ~20% pull toward unison/octave/fifth.
-- **Breathing** amplitude arcs instead of a sustained pad; post-recording "chew"
-  gesture; LOGOS events open/aerate/stabilize the body (coupling reused).
-- `MODEL.BIN` version bumped to 2; an older model reinitializes (pitch spread
-  restarts at 0) while the recording archive and `GRAINS.CSV` are untouched.
+- **Breathing** amplitude arcs (smoothed, ~3 s glide — no stepping) instead of a
+  sustained pad; post-recording "chew" gesture. The amplitude **sidechain was
+  removed** (MELOS no longer pumps with LOGOS); LOGOS events still open/aerate
+  the *vowel*, not the volume.
+- **Rare intelligible words (LOGOS):** a grain on any stream occasionally plays
+  as a whole forward, normal-speed word (`LOGOS_WORD_PERCENT`, currently 25);
+  every other grain is forced into cloud/micro deconstruction, so clear words
+  emerge from the texture instead of dominating.
+- `MODEL.BIN` version bumped to 2 (added `meanLogF0Sq` for pitch spread); an
+  older model reinitializes (spread restarts at 0) while the recording archive
+  and `GRAINS.CSV` are untouched.
 
 ### `ooho_combined_emergent/ooho_combined_emergent.ino`
 

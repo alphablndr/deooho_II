@@ -1,9 +1,17 @@
 # Design: MELOS as Collective Vocal Body (`ooho_combined_voicebody`)
 
 Date: 2026-06-03
-Status: approved (pending spec review)
-Base build: `ooho_combined_waveset/ooho_combined_waveset.ino` (current active build)
+Status: **implemented and verified on hardware** (Teensy 4.1, 2026-06-03)
+Base build: `ooho_combined_waveset/ooho_combined_waveset.ino`
 New sketch: `ooho_combined_voicebody/ooho_combined_voicebody.ino`
+
+> **As-built note.** This design is implemented. The MELOS engine matches the
+> sections below (source-formant-filter, 6-voice swarm, archive-spread bloom,
+> consonance pull, vowel from bands, breathing, chew gesture). Deltas decided by
+> ear after the first build are listed in **As-Built Tuning** at the end. The
+> biggest ones: the LOGOS→MELOS amplitude **sidechain was removed**, MELOS
+> amplitude was **smoothed** (no stepping), and a new LOGOS feature was added —
+> **rare intelligible whole words** emerging from the granular texture.
 
 > **North star (variant A):** MELOS is a **collective vocal body** — many voices
 > as one, a body made of the archive, "our shared medium of voice." Every design
@@ -216,3 +224,38 @@ M7 FPU. Memory: a handful of floats; no new large buffers.
 6. LOGOS swarm blurs/aerates MELOS; clear words stabilize it — no crunch,
    modulation, or dropout.
 7. `ooho_combined_waveset` unchanged (fallback intact).
+
+## As-Built Tuning (decided by ear, 2026-06-03)
+
+Changes made after the first working build, in commit order:
+
+1. **MELOS amplitude smoothed (no stepping).** The breathing arc now glides over
+   ~3 s (`MELOS_BREATH_EASE = 1/(3·SR)`) instead of snapping to each target in
+   ~50 ms, and the archive envelope is **linearly interpolated between bins**
+   instead of stepping per bin. Amplitude changes are smooth and slow.
+2. **Sidechain removed.** The LOGOS→MELOS amplitude duck was removed
+   (`amp = melosBreathArc * envShape`, no `duck` term). MELOS volume no longer
+   pumps with the left channel. `MELOS_SIDECHAIN_DUCK` is now unused; the LOGOS
+   envelope still gently *opens the vowel* (not the volume).
+3. **Rare intelligible LOGOS words (new feature, left channel).** Independent of
+   the MELOS work. A grain on **any** stream may play as a whole **forward,
+   rate-1.0** intelligible word with probability `LOGOS_WORD_PERCENT`; every
+   other grain is forced into cloud/micro deconstruction, so clear words never
+   slip through by accident. Iterated by ear: stream-1-only @14% → @6% → all
+   streams @ **25%** (current). Tune with `LOGOS_WORD_PERCENT`; absolute
+   frequency also breathes with the LOGOS density mode (sparse/present/swarm).
+
+### Key tunables (current values)
+
+| Constant | Value | Effect |
+|---|---|---|
+| `MELOS_VOICE_COUNT` | 6 | crowd size |
+| `MELOS_SPREAD_MAX_SEMITONES` | 7 | widest pitch bloom |
+| `MELOS_CONSONANCE_PULL` | 0.20 | pull toward octave/fifth |
+| `MELOS_MAKEUP` | 2.2 | post-formant level before soft clip |
+| `MELOS_BREATH_EASE` | 1/(3·SR) | amplitude glide rate |
+| `MELOS_GAIN` | 0.525 | right-channel level |
+| `LOGOS_WORD_PERCENT` | 25 | clear-word frequency (all streams) |
+
+Model: `MODEL_VERSION = 2` (added `meanLogF0Sq` for pitch spread); an older
+`MODEL.BIN` reinitializes, recordings/`GRAINS.CSV` untouched.
