@@ -110,6 +110,7 @@ constexpr float MELOS_VOWEL_EASE = 1.0f / (3.0f * SAMPLE_RATE);   // ~3 s vowel/
 constexpr float MELOS_F0_EASE = 1.0f / (4.0f * SAMPLE_RATE);      // ~4 s pitch center ease
 constexpr uint32_t MELOS_BREATH_MIN_MS = 4000;
 constexpr uint32_t MELOS_BREATH_MAX_MS = 8000;
+constexpr float MELOS_BREATH_EASE = 1.0f / (3.0f * SAMPLE_RATE);  // ~3 s glide, no steps
 constexpr float MELOS_MAKEUP = 2.2f;               // post-formant makeup before soft clip
 constexpr uint32_t MELOS_MODE_MIN_MS = 20000;
 constexpr uint32_t MELOS_MODE_MAX_MS = 90000;
@@ -1687,7 +1688,7 @@ void melosBlockUpdate() {
     melosBreathArcTarget = r < 0.18f ? 0.06f : (0.45f + 0.55f * r2);
     melosBreathNextSample = melosSampleCounter + melosRandomSamples(MELOS_BREATH_MIN_MS, MELOS_BREATH_MAX_MS);
   }
-  melosBreathArc += (melosBreathArcTarget - melosBreathArc) * (0.0009f * blk);
+  melosBreathArc += (melosBreathArcTarget - melosBreathArc) * (MELOS_BREATH_EASE * blk);
 
   // LOGOS coupling decay.
   const float activeDensity = constrain(static_cast<float>(activeLogosStreamCount()) / LOGOS_STREAM_COUNT * MELOS_LOGOS_COUPLING, 0.0f, 1.0f);
@@ -1773,11 +1774,15 @@ float melosNextSample() {
   // Slow archive envelope shaping + breathing arc + LOGOS sidechain duck.
   melosEnvPhase += MELOS_ENV_INC;
   melosEnvPhase -= floorf(melosEnvPhase);
-  uint8_t envBin = static_cast<uint8_t>(melosEnvPhase * ENV_BINS);
+  const float envPos = melosEnvPhase * ENV_BINS;
+  uint8_t envBin = static_cast<uint8_t>(envPos);
   if (envBin >= ENV_BINS) {
     envBin = ENV_BINS - 1;
   }
-  const float envShape = 0.7f + 0.3f * melosSmoothedEnv[envBin];
+  const uint8_t envBinNext = (envBin + 1) % ENV_BINS;
+  const float envFrac = envPos - floorf(envPos);
+  const float envVal = melosSmoothedEnv[envBin] * (1.0f - envFrac) + melosSmoothedEnv[envBinNext] * envFrac;
+  const float envShape = 0.7f + 0.3f * envVal;
   const float duck = constrain(1.0f - melosLogosEnvelope * MELOS_SIDECHAIN_DUCK, 0.56f, 1.0f);
   const float amp = melosBreathArc * envShape * duck;
 
