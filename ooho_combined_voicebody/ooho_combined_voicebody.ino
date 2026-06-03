@@ -150,6 +150,12 @@ constexpr uint32_t LOGOS_SPLIT_GAP_MS = 160;
 constexpr float LOGOS_MIN_RMS_THRESHOLD = 0.008f;
 constexpr float LOGOS_MAX_RMS_THRESHOLD = 0.090f;
 constexpr float LOGOS_WINDOW_PEAK_FACTOR = 0.18f;
+// Smarter grain slicing: hysteresis (capture consonants/soft edges), split long
+// regions at the quietest internal point, snap grain edges to zero crossings.
+constexpr float LOGOS_HYST_FACTOR = 0.45f;          // continue threshold = start * this
+constexpr uint32_t LOGOS_SPLIT_SEARCH_MS = 260;     // search radius for a quiet cut
+constexpr uint32_t LOGOS_ZC_SEARCH_SAMPLES = 256;   // ~6 ms zero-crossing snap radius
+constexpr uint32_t LOGOS_MAX_WINDOWS = ((FIELD_RECORD_BYTES / 2) / LOGOS_WINDOW_SAMPLES) + 2;
 
 // LOGOS reverse / rate variation
 constexpr uint8_t LOGOS_REVERSE_PERCENT = 30;
@@ -1191,34 +1197,96 @@ bool appendGrain(const char *filename, uint32_t startMs, uint32_t durationMs) {
   return ok;
 }
 
-uint32_t appendRegionGrains(const char *filename, uint32_t startSample, uint32_t endSample) {
-  if (endSample <= startSample) {
+float logosWindowRms[LOGOS_MAX_WINDOWS];
+
+// Snap a boundary to the nearest zero crossing within a small radius.
+uint32_t snapToZeroCrossing(const int16_t *samples, uint32_t total, uint32_t pos, uint32_t radius) {
+  if (total == 0) {
+    return 0;
+  }
+  if (pos >= total) {
+    pos = total - 1;
+  }
+  const uint32_t lo = pos > radius ? pos - radius : 1;
+  const uint32_t hi = pos + radius < total ? pos + radius : total - 1;
+  uint32_t best = pos;
+  uint32_t bestDist = radius + 1;
+  for (uint32_t i = lo; i <= hi; ++i) {
+    const bool crossing = (samples[i - 1] <= 0 && samples[i] > 0) ||
+                          (samples[i - 1] >= 0 && samples[i] < 0);
+    if (crossing) {
+      const uint32_t d = i > pos ? i - pos : pos - i;
+      if (d < bestDist) {
+        bestDist = d;
+        best = i;
+      }
+    }
+  }
+  return best;
+}
+
+// Emit grains for one voiced region. Long regions are split at the quietest
+// window near the target length (a syllable/word seam), not on a fixed grid;
+// every boundary is snapped to a zero crossing.
+uint32_t emitRegionGrains(const int16_t *samples, uint32_t total, uint32_t winStart, uint32_t winEnd,
+                          uint32_t s0, uint32_t s1) {
+  if (s1 <= s0) {
+    return 0;
+  }
+  s0 = snapToZeroCrossing(samples, total, s0, LOGOS_ZC_SEARCH_SAMPLES);
+  s1 = snapToZeroCrossing(samples, total, s1, LOGOS_ZC_SEARCH_SAMPLES);
+  if (s1 <= s0) {
     return 0;
   }
 
-  const uint32_t startMs = startSample * 1000UL / SAMPLE_RATE;
-  const uint32_t durationMs = (endSample - startSample) * 1000UL / SAMPLE_RATE;
-  if (durationMs < LOGOS_MIN_DURATION_MS) {
+  const uint32_t samplesPerMs = SAMPLE_RATE / 1000UL;
+  const uint32_t minSamples = LOGOS_MIN_DURATION_MS * samplesPerMs;
+  const uint32_t maxSamples = LOGOS_MAX_DURATION_MS * samplesPerMs;
+  const uint32_t splitSamples = LOGOS_SPLIT_DURATION_MS * samplesPerMs;
+  const uint32_t searchWindows = (LOGOS_SPLIT_SEARCH_MS * samplesPerMs) / LOGOS_WINDOW_SAMPLES;
+
+  if (s1 - s0 < minSamples) {
     return 0;
   }
-
-  if (durationMs <= LOGOS_MAX_DURATION_MS) {
-    return appendGrain(filename, startMs, durationMs) ? 1 : 0;
+  if (s1 - s0 <= maxSamples) {
+    return appendGrain(currentFilename, s0 * 1000UL / SAMPLE_RATE, (s1 - s0) * 1000UL / SAMPLE_RATE) ? 1 : 0;
   }
 
   uint32_t added = 0;
-  uint32_t cursorMs = startMs;
-  const uint32_t endMs = startMs + durationMs;
-  while (cursorMs + LOGOS_MIN_DURATION_MS <= endMs) {
-    const uint32_t remainingMs = endMs - cursorMs;
-    const uint32_t chunkMs = remainingMs < LOGOS_SPLIT_DURATION_MS ? remainingMs : LOGOS_SPLIT_DURATION_MS;
-    if (chunkMs >= LOGOS_MIN_DURATION_MS && appendGrain(filename, cursorMs, chunkMs)) {
+  uint32_t cursor = s0;
+  while (s1 - cursor > maxSamples) {
+    const uint32_t targetSample = cursor + splitSamples;
+    uint32_t targetWin = targetSample / LOGOS_WINDOW_SAMPLES;
+    uint32_t lo = targetWin > searchWindows ? targetWin - searchWindows : winStart;
+    if (lo < winStart + 1) {
+      lo = winStart + 1;
+    }
+    uint32_t hi = targetWin + searchWindows < winEnd ? targetWin + searchWindows : winEnd - 1;
+    uint32_t bestWin = targetWin;
+    float bestRms = 1.0e9f;
+    for (uint32_t ww = lo; ww <= hi; ++ww) {
+      if (logosWindowRms[ww] < bestRms) {
+        bestRms = logosWindowRms[ww];
+        bestWin = ww;
+      }
+    }
+    uint32_t cut = snapToZeroCrossing(samples, total, bestWin * LOGOS_WINDOW_SAMPLES, LOGOS_ZC_SEARCH_SAMPLES);
+    if (cut < cursor + minSamples) {
+      cut = cursor + splitSamples;  // safety: keep making progress
+    }
+    if (cut > s1) {
+      cut = s1;
+    }
+    const uint32_t segMs = (cut - cursor) * 1000UL / SAMPLE_RATE;
+    if (segMs >= LOGOS_MIN_DURATION_MS && appendGrain(currentFilename, cursor * 1000UL / SAMPLE_RATE, segMs)) {
       added++;
     }
-    if (remainingMs <= LOGOS_SPLIT_DURATION_MS + LOGOS_SPLIT_GAP_MS) {
-      break;
-    }
-    cursorMs += LOGOS_SPLIT_DURATION_MS + LOGOS_SPLIT_GAP_MS;
+    cursor = cut;
+    workTick();
+  }
+  const uint32_t tailMs = (s1 - cursor) * 1000UL / SAMPLE_RATE;
+  if (tailMs >= LOGOS_MIN_DURATION_MS && appendGrain(currentFilename, cursor * 1000UL / SAMPLE_RATE, tailMs)) {
+    added++;
   }
   return added;
 }
@@ -1231,90 +1299,91 @@ void appendLogosGrains() {
     return;
   }
 
-  double totalEnergy = 0.0;
-  float peak = 0.0f;
+  // 1. Per-window RMS (stored so we can extend edges and find quiet split points).
+  uint32_t windowCount = totalSamples / LOGOS_WINDOW_SAMPLES;
+  if (windowCount > LOGOS_MAX_WINDOWS) {
+    windowCount = LOGOS_MAX_WINDOWS;
+  }
   float maxWindowRms = 0.0f;
-  uint32_t windowCount = 0;
-
-  for (uint32_t i = 0; i < totalSamples; ++i) {
-    const float s = samples[i] / 32768.0f;
-    const float absS = fabsf(s);
-    totalEnergy += static_cast<double>(s) * s;
-    if (absS > peak) {
-      peak = absS;
+  double totalEnergy = 0.0;
+  for (uint32_t w = 0; w < windowCount; ++w) {
+    const uint32_t base = w * LOGOS_WINDOW_SAMPLES;
+    double sumSquares = 0.0;
+    for (uint32_t i = 0; i < LOGOS_WINDOW_SAMPLES; ++i) {
+      const float s = samples[base + i] / 32768.0f;
+      sumSquares += static_cast<double>(s) * s;
     }
-    if ((i & 0x7FFUL) == 0) {
+    const float rms = sqrtf(sumSquares / LOGOS_WINDOW_SAMPLES);
+    logosWindowRms[w] = rms;
+    if (rms > maxWindowRms) {
+      maxWindowRms = rms;
+    }
+    totalEnergy += sumSquares;
+    if ((w & 0x3FUL) == 0) {
       workTick();
     }
   }
 
-  for (uint32_t start = 0; start + LOGOS_WINDOW_SAMPLES <= totalSamples; start += LOGOS_WINDOW_SAMPLES) {
-    double sumSquares = 0.0;
-    for (uint32_t i = 0; i < LOGOS_WINDOW_SAMPLES; ++i) {
-      const float s = samples[start + i] / 32768.0f;
-      sumSquares += static_cast<double>(s) * s;
-    }
-    const float windowRms = sqrtf(sumSquares / LOGOS_WINDOW_SAMPLES);
-    if (windowRms > maxWindowRms) {
-      maxWindowRms = windowRms;
-    }
-    windowCount++;
-    workTick();
-  }
+  float startThreshold = constrain(maxWindowRms * LOGOS_WINDOW_PEAK_FACTOR, LOGOS_MIN_RMS_THRESHOLD, LOGOS_MAX_RMS_THRESHOLD);
+  const float continueThreshold = startThreshold * LOGOS_HYST_FACTOR;
 
-  float adaptiveThreshold = maxWindowRms * LOGOS_WINDOW_PEAK_FACTOR;
-  adaptiveThreshold = constrain(adaptiveThreshold, LOGOS_MIN_RMS_THRESHOLD, LOGOS_MAX_RMS_THRESHOLD);
-
-  const float overallRms = sqrtf(totalEnergy / totalSamples);
+  const float overallRms = sqrtf(totalEnergy / (static_cast<double>(windowCount) * LOGOS_WINDOW_SAMPLES));
   Serial.print("LOGOS analysis: duration_ms=");
   Serial.print(totalSamples * 1000UL / SAMPLE_RATE);
   Serial.print(", rms=");
   Serial.print(overallRms, 5);
-  Serial.print(", peak=");
-  Serial.print(peak, 5);
   Serial.print(", max_window_rms=");
   Serial.print(maxWindowRms, 5);
-  Serial.print(", threshold=");
-  Serial.print(adaptiveThreshold, 5);
+  Serial.print(", startThr=");
+  Serial.print(startThreshold, 5);
+  Serial.print(", contThr=");
+  Serial.print(continueThreshold, 5);
   Serial.print(", windows=");
   Serial.println(windowCount);
 
-  const uint32_t gapToleranceSamples = LOGOS_GAP_TOLERANCE_MS * (SAMPLE_RATE / 1000UL);
-  uint32_t regionStart = 0;
-  uint32_t regionEnd = 0;
-  uint32_t lastVoicedEnd = 0;
-  bool inRegion = false;
+  // 2. Hysteresis regions: a run stays alive above continueThreshold (so soft
+  // consonants/onsets/tails are kept), but is only emitted if it contains a
+  // voiced core above startThreshold.
+  uint32_t gapWindows = (LOGOS_GAP_TOLERANCE_MS * (SAMPLE_RATE / 1000UL)) / LOGOS_WINDOW_SAMPLES;
+  if (gapWindows < 1) {
+    gapWindows = 1;
+  }
   uint32_t added = 0;
-
-  for (uint32_t start = 0; start + LOGOS_WINDOW_SAMPLES <= totalSamples; start += LOGOS_WINDOW_SAMPLES) {
-    double sumSquares = 0.0;
-    for (uint32_t i = 0; i < LOGOS_WINDOW_SAMPLES; ++i) {
-      const float s = samples[start + i] / 32768.0f;
-      sumSquares += static_cast<double>(s) * s;
+  uint32_t w = 0;
+  while (w < windowCount) {
+    if (logosWindowRms[w] <= continueThreshold) {
+      ++w;
+      continue;
     }
-    const float rms = sqrtf(sumSquares / LOGOS_WINDOW_SAMPLES);
-    const bool voiced = rms > adaptiveThreshold;
-    const uint32_t windowEnd = start + LOGOS_WINDOW_SAMPLES;
-
-    if (voiced) {
-      if (!inRegion) {
-        regionStart = start;
-        inRegion = true;
-      } else if (start > lastVoicedEnd + gapToleranceSamples) {
-        added += appendRegionGrains(currentFilename, regionStart, regionEnd);
-        regionStart = start;
+    const uint32_t runStart = w;
+    uint32_t lastAbove = w;
+    bool hasCore = false;
+    uint32_t gap = 0;
+    while (w < windowCount) {
+      if (logosWindowRms[w] > continueThreshold) {
+        if (logosWindowRms[w] > startThreshold) {
+          hasCore = true;
+        }
+        lastAbove = w;
+        gap = 0;
+      } else {
+        ++gap;
+        if (gap > gapWindows) {
+          break;
+        }
       }
-      regionEnd = windowEnd;
-      lastVoicedEnd = windowEnd;
-    } else if (inRegion && start > lastVoicedEnd + gapToleranceSamples) {
-      added += appendRegionGrains(currentFilename, regionStart, regionEnd);
-      inRegion = false;
+      ++w;
+    }
+    if (hasCore) {
+      const uint32_t runEnd = lastAbove + 1;  // exclusive window
+      uint32_t s0 = runStart * LOGOS_WINDOW_SAMPLES;
+      uint32_t s1 = runEnd * LOGOS_WINDOW_SAMPLES;
+      if (s1 > totalSamples) {
+        s1 = totalSamples;
+      }
+      added += emitRegionGrains(samples, totalSamples, runStart, runEnd, s0, s1);
     }
     workTick();
-  }
-
-  if (inRegion) {
-    added += appendRegionGrains(currentFilename, regionStart, regionEnd);
   }
 
   grainCount += added;

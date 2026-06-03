@@ -59,6 +59,23 @@ LOGOS tweak below.
   emerge from the texture; absolute frequency still breathes with the density
   mode.
 
+### LOGOS: smarter grain slicing (`appendLogosGrains`)
+
+The post-recording analysis was upgraded from a plain energy gate to:
+
+- **Hysteresis** detection — a high `startThreshold` begins a region, a lower
+  `continueThreshold` (`= start * LOGOS_HYST_FACTOR`) keeps it alive, so soft
+  consonants / onsets / tails are captured (words keep their consonants).
+- **Quiet-point splitting** — long regions are split at the **lowest-RMS window
+  near the target length** (a syllable/word seam) instead of a fixed time grid.
+- **Zero-crossing snap** — every grain boundary is nudged to the nearest zero
+  crossing (`LOGOS_ZC_SEARCH_SAMPLES`) for clean cuts.
+
+Per-window RMS is precomputed into `logosWindowRms[LOGOS_MAX_WINDOWS]`. Tunables:
+`LOGOS_HYST_FACTOR`, `LOGOS_SPLIT_SEARCH_MS`, `LOGOS_ZC_SEARCH_SAMPLES`. Next
+planned step (not done): per-grain brightness/voiced tags in `GRAINS.CSV` so
+playback can route grains to matching stream roles.
+
 ## Model Change
 
 `MODEL_VERSION` bumped to **2** (added `float meanLogF0Sq` after `meanLogF0`).
