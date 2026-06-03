@@ -5,6 +5,12 @@ Status: approved (pending spec review)
 Base build: `ooho_combined_waveset/ooho_combined_waveset.ino` (current active build)
 New sketch: `ooho_combined_voicebody/ooho_combined_voicebody.ino`
 
+> **North star (variant A):** MELOS is a **collective vocal body** — many voices
+> as one, a body made of the archive, "our shared medium of voice." Every design
+> and implementation decision is judged against this: does it make MELOS sound
+> more like a living collective voice, or more like a synthesizer? If a feature
+> serves cleverness over the collective-body identity, it is wrong.
+
 ## Summary
 
 Redesign the **MELOS** (right-channel) synthesizer so it reads as a *collective
