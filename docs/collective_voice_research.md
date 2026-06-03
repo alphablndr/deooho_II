@@ -2,6 +2,16 @@
 
 This document maps artistic and technical strategies for the next firmware layer of The Ooho II.
 
+Status note:
+
+```text
+This is a historical/research document, not the current firmware spec.
+Older names such as COLLECT.WAV and LOG.CSV appear below as research-era terms.
+Current implementation names are MELOS.WAV, GRAINS.CSV, MODEL.BIN, and Wxxxx.WAV.
+For the current stable firmware state, read docs/project_knowledge.md first.
+For the current bring-up sequence, read docs/bringup_pipeline.md.
+```
+
 Current installation premise:
 
 - A wall-mounted ear has one button.

@@ -89,7 +89,18 @@ constexpr float MELOS_PARAM_EASE = 1.0f / (4.0f * SAMPLE_RATE);   // ~4 s ease t
 constexpr float MELOS_ENV_INC = 1.0f / (28.0f * SAMPLE_RATE);     // ~28 s envelope cycle
 constexpr float MELOS_PARTIAL_MAX_HZ = 8000.0f;
 constexpr uint16_t MELOS_MAX_PARTIALS = 24;
+constexpr uint16_t MELOS_PARTIALS_PER_VOICE = 16;
 constexpr uint16_t MELOS_SINE_SIZE = 2048;
+constexpr uint8_t MELOS_VOICE_COUNT = 3;
+constexpr uint8_t MELOS_MODE_COUNT = 5;
+constexpr uint32_t MELOS_MODE_MIN_MS = 20000;
+constexpr uint32_t MELOS_MODE_MAX_MS = 90000;
+constexpr uint32_t MELOS_CONSTRICTION_MIN_MS = 12000;
+constexpr uint32_t MELOS_CONSTRICTION_MAX_MS = 45000;
+constexpr uint32_t MELOS_CONSTRICTION_EVENT_MIN_MS = 80;
+constexpr uint32_t MELOS_CONSTRICTION_EVENT_MAX_MS = 320;
+constexpr float MELOS_TRACT_EASE = 1.0f / (10.0f * SAMPLE_RATE);  // ~10 s vowel morph
+constexpr float MELOS_VOICE_EASE = 1.0f / (8.0f * SAMPLE_RATE);   // ~8 s choir morph
 
 constexpr uint8_t LOGOS_STREAM_COUNT = 4;
 constexpr uint32_t LOGOS_STREAM_1_MIN_INTERVAL_MS = 4000;
@@ -119,6 +130,13 @@ constexpr uint8_t LOGOS_RATE_PERCENT = 20;
 constexpr float LOGOS_RATE_SLOW = 0.70f;
 constexpr float LOGOS_RATE_FAST = 1.40f;
 constexpr uint32_t LOGOS_MAX_GRAIN_SAMPLES = ((LOGOS_MAX_DURATION_MS + 50) * SAMPLE_RATE) / 1000UL;
+constexpr uint32_t LOGOS_MICRO_MIN_MS = 60;
+constexpr uint32_t LOGOS_MICRO_MAX_MS = 220;
+constexpr uint32_t LOGOS_BREATH_PULSE_MS = 920;
+constexpr uint32_t LOGOS_PULSE_JITTER_MS = 120;
+constexpr uint8_t LOGOS_MICRO_STREAM1_PERCENT = 12;
+constexpr uint8_t LOGOS_MICRO_OTHER_PERCENT = 68;
+constexpr uint8_t LOGOS_MUSICAL_RATE_PERCENT = 38;
 
 constexpr uint32_t ANALYSIS_RATE = 11025;
 constexpr uint16_t F0_FRAME_SAMPLES = 1024;
@@ -202,6 +220,7 @@ struct LogosStream {
   AudioPlayQueue *queue;
   int16_t *buffer = nullptr;     // PSRAM grain buffer
   uint32_t bufferSamples = 0;    // valid source samples in buffer
+  bool granular = false;
   bool reversed = false;
   float rate = 1.0f;             // 1.0 normal, 0.70 slow, 1.40 fast
   float readPos = 0.0f;          // fractional read index into buffer
@@ -257,7 +276,22 @@ float melosEnvPhase = 0.0f;
 float melosF0 = DEFAULT_F0_HZ;
 float melosVoicedRatio = DEFAULT_VOICED_RATIO;
 float melosBandWeight[BAND_COUNT];
+float melosVowelWeight[BAND_COUNT];
+float melosTargetVowelWeight[BAND_COUNT];
 float melosSmoothedEnv[ENV_BINS];
+float melosVoicePhase[MELOS_VOICE_COUNT];
+float melosVoiceRatio[MELOS_VOICE_COUNT];
+float melosTargetVoiceRatio[MELOS_VOICE_COUNT];
+float melosVoiceLevel[MELOS_VOICE_COUNT];
+float melosTargetVoiceLevel[MELOS_VOICE_COUNT];
+float melosBreathMix = 0.0f;
+float melosTargetBreathMix = 0.0f;
+float melosConstriction = 0.0f;
+float melosConstrictionTarget = 0.0f;
+uint8_t melosMode = 0;
+uint32_t melosNextModeSample = 0;
+uint32_t melosNextConstrictionSample = 0;
+uint32_t melosConstrictionReleaseSample = 0;
 uint32_t melosSampleCounter = 0;
 float melosSine[MELOS_SINE_SIZE];
 
@@ -374,13 +408,47 @@ uint8_t bandForFreq(float f) {
   return BAND_COUNT - 1;
 }
 
+uint32_t musicalLogosIntervalMs(uint8_t index) {
+  static const uint8_t pulseMultipliers[] = {1, 1, 2, 3, 4, 6};
+  static const uint8_t burstMultipliers[] = {1, 1, 1, 2, 2, 3};
+  const bool burstRole = index == 3;
+  const uint8_t *choices = burstRole ? burstMultipliers : pulseMultipliers;
+  const uint8_t choice = choices[nextRandomU32() % 6];
+  int32_t interval = static_cast<int32_t>(LOGOS_BREATH_PULSE_MS) * choice;
+  interval += static_cast<int32_t>(randomRangeMs(0, LOGOS_PULSE_JITTER_MS * 2UL)) - static_cast<int32_t>(LOGOS_PULSE_JITTER_MS);
+  if (interval < static_cast<int32_t>(LOGOS_ACTIVE_MIN_INTERVAL_MS)) {
+    interval = LOGOS_ACTIVE_MIN_INTERVAL_MS;
+  }
+  if (interval > static_cast<int32_t>(LOGOS_ACTIVE_MAX_INTERVAL_MS)) {
+    interval = LOGOS_ACTIVE_MAX_INTERVAL_MS;
+  }
+  return static_cast<uint32_t>(interval);
+}
+
+float musicalLogosRate(uint8_t index) {
+  static const float allRates[] = {0.50f, 0.75f, 1.3333f, 1.50f};
+  static const float lowRates[] = {0.50f, 0.75f, 0.75f, 1.3333f};
+  static const float brightRates[] = {0.75f, 1.3333f, 1.50f, 1.50f};
+  const float *choices = allRates;
+  if (index == 2) {
+    choices = lowRates;
+  } else if (index == 3) {
+    choices = brightRates;
+  }
+  return choices[nextRandomU32() % 4];
+}
+
 void scheduleLogosStream(LogosStream &stream, uint8_t index) {
   if (index == 0) {
     stream.nextEventMs = millis() + randomRangeMs(LOGOS_STREAM_1_MIN_INTERVAL_MS, LOGOS_STREAM_1_MAX_INTERVAL_MS);
   } else if (stream.activeMode) {
-    stream.nextEventMs = millis() + randomRangeMs(LOGOS_ACTIVE_MIN_INTERVAL_MS, LOGOS_ACTIVE_MAX_INTERVAL_MS);
+    stream.nextEventMs = millis() + musicalLogosIntervalMs(index);
   } else {
-    stream.nextEventMs = millis() + randomRangeMs(LOGOS_DORMANT_MIN_INTERVAL_MS, LOGOS_DORMANT_MAX_INTERVAL_MS);
+    const uint32_t density = grainCount < 240UL ? grainCount : 240UL;
+    const uint32_t shrink = density * 250UL;
+    const uint32_t minDormant = LOGOS_DORMANT_MIN_INTERVAL_MS > shrink ? LOGOS_DORMANT_MIN_INTERVAL_MS - shrink : 18000UL;
+    const uint32_t maxDormant = LOGOS_DORMANT_MAX_INTERVAL_MS > shrink ? LOGOS_DORMANT_MAX_INTERVAL_MS - shrink : 45000UL;
+    stream.nextEventMs = millis() + randomRangeMs(minDormant, maxDormant);
   }
 }
 
@@ -1136,6 +1204,91 @@ void computeMelosEnvelope() {
   }
 }
 
+uint32_t melosRandomSamples(uint32_t minMs, uint32_t maxMs) {
+  return randomRangeMs(minMs, maxMs) * (SAMPLE_RATE / 1000UL);
+}
+
+float melosModeBand(uint8_t mode, uint8_t band) {
+  static const float vowelShapes[MELOS_MODE_COUNT][BAND_COUNT] = {
+    // body / oo: dark, rounded, almost closed.
+    {1.75f, 1.55f, 1.05f, 0.72f, 0.42f, 0.25f, 0.16f, 0.10f},
+    // open / aa: chest and open mouth.
+    {0.92f, 1.20f, 1.55f, 1.42f, 0.88f, 0.44f, 0.22f, 0.12f},
+    // bright / ee: thin tongue-forward color.
+    {0.36f, 0.52f, 0.88f, 1.18f, 1.65f, 1.25f, 0.62f, 0.24f},
+    // whisper / fricative air: less body, more lip/teeth air.
+    {0.20f, 0.32f, 0.52f, 0.80f, 1.05f, 1.35f, 1.25f, 0.72f},
+    // nasal / narrow: middle-heavy and slightly strange.
+    {0.58f, 0.95f, 1.78f, 1.62f, 0.75f, 0.34f, 0.20f, 0.12f}
+  };
+  return vowelShapes[mode % MELOS_MODE_COUNT][band];
+}
+
+void chooseMelosMode(bool immediate) {
+  melosMode = nextRandomU32() % MELOS_MODE_COUNT;
+
+  static const float ratios[MELOS_MODE_COUNT][MELOS_VOICE_COUNT] = {
+    {0.997f, 1.000f, 1.004f},   // unison body
+    {0.500f, 1.000f, 1.500f},   // low fifth / octave body
+    {1.000f, 1.333f, 1.500f},   // open just chord
+    {1.000f, 2.000f, 3.000f},   // breath overtones
+    {0.750f, 1.000f, 1.500f}    // nasal thread
+  };
+  static const float levels[MELOS_MODE_COUNT][MELOS_VOICE_COUNT] = {
+    {0.62f, 0.48f, 0.36f},
+    {0.40f, 0.62f, 0.30f},
+    {0.50f, 0.34f, 0.36f},
+    {0.18f, 0.10f, 0.08f},
+    {0.42f, 0.50f, 0.22f}
+  };
+  static const float breathMixes[MELOS_MODE_COUNT] = {0.12f, 0.18f, 0.10f, 0.58f, 0.22f};
+
+  for (uint8_t i = 0; i < MELOS_VOICE_COUNT; ++i) {
+    melosTargetVoiceRatio[i] = ratios[melosMode][i];
+    melosTargetVoiceLevel[i] = levels[melosMode][i];
+    if (immediate) {
+      melosVoiceRatio[i] = melosTargetVoiceRatio[i];
+      melosVoiceLevel[i] = melosTargetVoiceLevel[i];
+      melosVoicePhase[i] = static_cast<float>(nextRandomU32() & 0xFFFFUL) / 65535.0f;
+    }
+  }
+  for (uint8_t b = 0; b < BAND_COUNT; ++b) {
+    melosTargetVowelWeight[b] = melosModeBand(melosMode, b);
+    if (immediate) {
+      melosVowelWeight[b] = melosTargetVowelWeight[b];
+    }
+  }
+  melosTargetBreathMix = breathMixes[melosMode];
+  if (immediate) {
+    melosBreathMix = melosTargetBreathMix;
+  }
+  melosNextModeSample = melosSampleCounter + melosRandomSamples(MELOS_MODE_MIN_MS, MELOS_MODE_MAX_MS);
+}
+
+void updateMelosVocalTract() {
+  if (melosSampleCounter >= melosNextModeSample) {
+    chooseMelosMode(false);
+  }
+  if (melosSampleCounter >= melosNextConstrictionSample) {
+    melosConstrictionTarget = 1.0f;
+    melosConstrictionReleaseSample = melosSampleCounter + melosRandomSamples(MELOS_CONSTRICTION_EVENT_MIN_MS, MELOS_CONSTRICTION_EVENT_MAX_MS);
+    melosNextConstrictionSample = melosSampleCounter + melosRandomSamples(MELOS_CONSTRICTION_MIN_MS, MELOS_CONSTRICTION_MAX_MS);
+  }
+  if (melosConstrictionTarget > 0.0f && melosSampleCounter >= melosConstrictionReleaseSample) {
+    melosConstrictionTarget = 0.0f;
+  }
+
+  for (uint8_t i = 0; i < MELOS_VOICE_COUNT; ++i) {
+    melosVoiceRatio[i] += (melosTargetVoiceRatio[i] - melosVoiceRatio[i]) * MELOS_VOICE_EASE;
+    melosVoiceLevel[i] += (melosTargetVoiceLevel[i] - melosVoiceLevel[i]) * MELOS_VOICE_EASE;
+  }
+  for (uint8_t b = 0; b < BAND_COUNT; ++b) {
+    melosVowelWeight[b] += (melosTargetVowelWeight[b] - melosVowelWeight[b]) * MELOS_TRACT_EASE;
+  }
+  melosBreathMix += (melosTargetBreathMix - melosBreathMix) * MELOS_TRACT_EASE;
+  melosConstriction += (melosConstrictionTarget - melosConstriction) * 0.0035f;
+}
+
 void initMelosSynth() {
   melosMainPhase = 0.0f;
   melosDrift = 0.0f;
@@ -1144,15 +1297,23 @@ void initMelosSynth() {
   melosBreathSlow = 0.0f;
   melosEnvPhase = 0.0f;
   melosSampleCounter = 0;
+  melosNextModeSample = 0;
+  melosNextConstrictionSample = melosRandomSamples(MELOS_CONSTRICTION_MIN_MS, MELOS_CONSTRICTION_MAX_MS);
+  melosConstrictionReleaseSample = 0;
+  melosConstriction = 0.0f;
+  melosConstrictionTarget = 0.0f;
   melosF0 = constrain(expf(model.meanLogF0), F0_MIN_HZ, F0_MAX_HZ);
   melosVoicedRatio = model.voicedRatio;
   for (uint8_t b = 0; b < BAND_COUNT; ++b) {
     melosBandWeight[b] = sqrtf(model.bands[b] * BAND_COUNT);
   }
+  chooseMelosMode(true);
   computeMelosEnvelope();
 }
 
 float melosNextSample() {
+  updateMelosVocalTract();
+
   // Ease working parameters toward the live model so the voice drifts slowly.
   const float targetF0 = constrain(expf(model.meanLogF0), F0_MIN_HZ, F0_MAX_HZ);
   melosF0 += (targetF0 - melosF0) * MELOS_PARAM_EASE;
@@ -1168,30 +1329,52 @@ float melosNextSample() {
     melosDriftTarget = constrain(melosDriftTarget, -0.035f, 0.035f);
   }
   melosDrift += (melosDriftTarget - melosDrift) * 0.0008f;
-  melosMainPhase += melosF0 * (1.0f + melosDrift) / SAMPLE_RATE;
-  melosMainPhase -= floorf(melosMainPhase);
 
-  // Harmonic partials of F0, weighted by the model bands.
+  // Pink-Trombone-lite: a small harmonic choir through a slowly morphing
+  // archive/vowel tract. It suggests articulation without producing words.
   float voiced = 0.0f;
-  uint16_t partials = 0;
-  for (uint16_t n = 1; n <= MELOS_MAX_PARTIALS; ++n) {
-    const float f = static_cast<float>(n) * melosF0;
-    if (f >= MELOS_PARTIAL_MAX_HZ) {
-      break;
+  float voiceNorm = 0.0f;
+  for (uint8_t v = 0; v < MELOS_VOICE_COUNT; ++v) {
+    const float voiceF0 = melosF0 * melosVoiceRatio[v] * (1.0f + melosDrift * (1.0f + 0.12f * v));
+    melosVoicePhase[v] += voiceF0 / SAMPLE_RATE;
+    melosVoicePhase[v] -= floorf(melosVoicePhase[v]);
+
+    float voice = 0.0f;
+    uint16_t partials = 0;
+    for (uint16_t n = 1; n <= MELOS_PARTIALS_PER_VOICE; ++n) {
+      const float f = static_cast<float>(n) * voiceF0;
+      if (f >= MELOS_PARTIAL_MAX_HZ) {
+        break;
+      }
+      const uint8_t band = bandForFreq(f);
+      float tractWeight = melosBandWeight[band] * (0.70f + 0.30f * melosVowelWeight[band]);
+      if (melosConstriction > 0.001f) {
+        if (band <= 1) {
+          tractWeight *= 1.0f - 0.34f * melosConstriction;
+        } else if (band >= 4) {
+          tractWeight *= 1.0f + 0.85f * melosConstriction;
+        }
+      }
+      const float rolloff = 1.0f / sqrtf(static_cast<float>(n));
+      voice += sineLookup(melosVoicePhase[v] * static_cast<float>(n)) * tractWeight * rolloff;
+      partials++;
     }
-    const uint8_t band = bandForFreq(f);
-    voiced += sineLookup(melosMainPhase * static_cast<float>(n)) * melosBandWeight[band];
-    partials++;
+    if (partials > 0) {
+      voice /= sqrtf(static_cast<float>(partials));
+    }
+    voiced += voice * melosVoiceLevel[v];
+    voiceNorm += melosVoiceLevel[v];
   }
-  if (partials > 0) {
-    voiced /= static_cast<float>(partials);
+  if (voiceNorm > 0.0f) {
+    voiced /= voiceNorm;
   }
 
   // Breath / noise component.
   const float white = nextRandomBipolar();
   melosBreathFast = melosBreathFast * 0.88f + white * 0.12f;
   melosBreathSlow = melosBreathSlow * 0.997f + white * 0.003f;
-  const float breath = (melosBreathFast - melosBreathSlow) * 0.42f;
+  float breath = (melosBreathFast - melosBreathSlow) * 0.42f;
+  breath *= 1.0f + melosBreathMix + melosConstriction * 0.75f;
 
   // Slow walk through the smoothed envelope shape.
   melosEnvPhase += MELOS_ENV_INC;
@@ -1202,7 +1385,8 @@ float melosNextSample() {
   }
   const float amp = melosSmoothedEnv[envBin] * 0.34f + 0.12f;
 
-  const float colored = voiced * melosVoicedRatio + breath * (1.0f - melosVoicedRatio);
+  const float effectiveVoiced = constrain(melosVoicedRatio * (1.0f - melosBreathMix * 0.42f - melosConstriction * 0.20f), 0.04f, 0.96f);
+  const float colored = voiced * effectiveVoiced + breath * (1.0f - effectiveVoiced);
   melosSampleCounter++;
   return softClip(colored * amp * MELOS_GAIN);
 }
@@ -1261,12 +1445,26 @@ bool startLogosGrain(uint8_t index, const GrainInfo &grain, uint32_t extraOffset
     return false;
   }
 
-  const uint32_t playbackDurationMs = grain.durationMs - extraOffsetMs;
+  uint32_t playbackStartMs = grain.startMs + extraOffsetMs;
+  uint32_t playbackDurationMs = grain.durationMs - extraOffsetMs;
+  const uint8_t microChance = index == 0 ? LOGOS_MICRO_STREAM1_PERCENT : LOGOS_MICRO_OTHER_PERCENT;
+  stream.granular = playbackDurationMs > LOGOS_MICRO_MIN_MS && (nextRandomU32() % 100UL) < microChance;
+  if (stream.granular) {
+    uint32_t maxMicroMs = LOGOS_MICRO_MAX_MS < playbackDurationMs ? LOGOS_MICRO_MAX_MS : playbackDurationMs;
+    uint32_t microDurationMs = randomRangeMs(LOGOS_MICRO_MIN_MS, maxMicroMs);
+    if (microDurationMs > playbackDurationMs) {
+      microDurationMs = playbackDurationMs;
+    }
+    const uint32_t maxOffsetMs = playbackDurationMs - microDurationMs;
+    playbackStartMs += randomRangeMs(0, maxOffsetMs);
+    playbackDurationMs = microDurationMs;
+  }
+
   uint32_t srcSamples = playbackDurationMs * (SAMPLE_RATE / 1000UL);
   if (srcSamples > LOGOS_MAX_GRAIN_SAMPLES) {
     srcSamples = LOGOS_MAX_GRAIN_SAMPLES;
   }
-  const uint32_t startSample = (grain.startMs + extraOffsetMs) * (SAMPLE_RATE / 1000UL);
+  const uint32_t startSample = playbackStartMs * (SAMPLE_RATE / 1000UL);
   const uint32_t byteOffset = 44 + startSample * 2UL;
   if (!file.seekSet(byteOffset)) {
     Serial.println("Could not seek LOGOS grain.");
@@ -1295,8 +1493,8 @@ bool startLogosGrain(uint8_t index, const GrainInfo &grain, uint32_t extraOffset
   }
 
   stream.rate = 1.0f;
-  if ((nextRandomU32() % 100UL) < LOGOS_RATE_PERCENT) {
-    stream.rate = (nextRandomU32() & 1UL) ? LOGOS_RATE_SLOW : LOGOS_RATE_FAST;
+  if ((nextRandomU32() % 100UL) < LOGOS_MUSICAL_RATE_PERCENT) {
+    stream.rate = musicalLogosRate(index);
   }
 
   stream.bufferSamples = loaded;
@@ -1306,7 +1504,7 @@ bool startLogosGrain(uint8_t index, const GrainInfo &grain, uint32_t extraOffset
   stream.samplesRemaining = outputTotal;
   stream.samplesPlayed = 0;
   stream.currentGrain = grain;
-  stream.currentStartMs = grain.startMs + extraOffsetMs;
+  stream.currentStartMs = playbackStartMs;
   stream.currentDurationMs = playbackDurationMs;
   stream.repeatEligible = repeatEligible;
   stream.queuedFreshAudio = false;
@@ -1319,6 +1517,7 @@ bool startLogosGrain(uint8_t index, const GrainInfo &grain, uint32_t extraOffset
   Serial.print(index + 1);
   Serial.print(' ');
   Serial.print(grain.filename);
+  Serial.print(stream.granular ? " micro" : " word");
   Serial.print(stream.reversed ? " REV" : " fwd");
   Serial.print(" rate=");
   Serial.print(stream.rate, 2);
