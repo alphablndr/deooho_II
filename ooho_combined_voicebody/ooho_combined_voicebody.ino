@@ -80,7 +80,7 @@ constexpr float DEFAULT_F0_HZ = 160.0f;
 constexpr float DEFAULT_VOICED_RATIO = 0.5f;
 constexpr float DEFAULT_RMS = 0.08f;
 
-constexpr float MELOS_GAIN = 0.27f;           // quieter body, ~half of the old level
+constexpr float MELOS_GAIN = 0.13f;           // quiet supporting body (halved again)
 constexpr float LOGOS_STREAM_GAIN = 0.60f;    // +25%, then compressed below
 constexpr float LOGOS_COMP_THRESHOLD = 0.18f;
 constexpr float LOGOS_COMP_RATIO = 3.0f;
