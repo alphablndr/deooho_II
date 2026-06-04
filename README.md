@@ -190,6 +190,17 @@ The LOGOS left channel is unchanged.
   as a whole forward, normal-speed word (`LOGOS_WORD_PERCENT`, currently 25);
   every other grain is forced into cloud/micro deconstruction, so clear words
   emerge from the texture instead of dominating.
+- **Timbral movement (Pink-Trombone-inspired):** nasality (a 4th murmur
+  resonator), wandering constriction ("almost-consonants"), vowel micro-wander,
+  and sub-choirs (some voices darker, some brighter). Autonomous but anchored to
+  archive-set centers (currently exaggerated for tuning).
+- **Smarter grain slicing** (hysteresis + quiet-point split + zero-crossing snap)
+  so grains are syllable/word-like; serial `x` re-slices the whole archive.
+- **Per-channel mastering** (`AudioMaster`: biquad EQ + soft limiter). The MELOS
+  bus drives a surface exciter on a **31 cm / 1.5 mm steel cube** — only a
+  protective 150 Hz high-pass; the metallic ring is kept on purpose (the cube is
+  the instrument). DC blockers on both buses. Serial `y` sweeps the exciter to
+  find cube resonances.
 - `MODEL.BIN` version bumped to 2 (added `meanLogF0Sq` for pitch spread); an
   older model reinitializes (spread restarts at 0) while the recording archive
   and `GRAINS.CSV` are untouched.

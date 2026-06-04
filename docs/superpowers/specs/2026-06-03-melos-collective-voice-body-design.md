@@ -244,6 +244,23 @@ Changes made after the first working build, in commit order:
    slip through by accident. Iterated by ear: stream-1-only @14% → @6% → all
    streams @ **25%** (current). Tune with `LOGOS_WORD_PERCENT`; absolute
    frequency also breathes with the LOGOS density mode (sparse/present/swarm).
+4. **Smarter grain slicing + archive re-slice.** `appendLogosGrains` rebuilt with
+   hysteresis (capture consonants), split long regions at the quietest internal
+   window, zero-crossing-snapped boundaries. Serial `x` re-slices the whole
+   archive (`rebuildGrainsFromArchive`). Grains became syllable/word-like.
+5. **MELOS made quieter and calmer.** `MELOS_GAIN` 0.525 → **0.13** (supporting
+   layer); breathing range narrowed to ~0.66..0.86 (no near-silence), glide ~5 s,
+   reduced envelope movement.
+6. **Timbral movement (Pink-Trombone-inspired).** Nasality (4th ~270 Hz
+   resonator), wandering constriction ("almost-consonants"), vowel micro-wander,
+   sub-choirs (half voices darker/brighter). Autonomous but anchored to
+   archive-set centers. **Currently exaggerated** so the movement is audible while
+   tuning; expect to dial down to a calm body.
+7. **Per-channel mastering (`AudioMaster`).** RBJ biquad EQ + soft limiter on each
+   output bus. LOGOS/speaker: HP 90 Hz + 2.5 dB at 3 kHz. MELOS/exciter on the
+   **31 cm / 1.5 mm steel cube**: HP **150 Hz only** — the metallic ring (2-6 kHz)
+   is **kept on purpose** (the cube is the instrument). DC blockers on both buses.
+   Serial `y` sweeps the exciter to find cube resonances.
 
 ### Key tunables (current values)
 
@@ -253,8 +270,9 @@ Changes made after the first working build, in commit order:
 | `MELOS_SPREAD_MAX_SEMITONES` | 7 | widest pitch bloom |
 | `MELOS_CONSONANCE_PULL` | 0.20 | pull toward octave/fifth |
 | `MELOS_MAKEUP` | 2.2 | post-formant level before soft clip |
-| `MELOS_BREATH_EASE` | 1/(3·SR) | amplitude glide rate |
-| `MELOS_GAIN` | 0.525 | right-channel level |
+| `MELOS_BREATH_EASE` | 1/(5·SR) | amplitude glide rate |
+| `MELOS_GAIN` | 0.13 | right-channel level (quiet body) |
+| `MELOS_VOWEL_WANDER` | 0.40 | autonomous vowel drift (exaggerated) |
 | `LOGOS_WORD_PERCENT` | 25 | clear-word frequency (all streams) |
 
 Model: `MODEL_VERSION = 2` (added `meanLogF0Sq` for pitch spread); an older

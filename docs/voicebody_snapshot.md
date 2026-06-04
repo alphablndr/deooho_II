@@ -39,7 +39,9 @@ LOGOS tweak below.
   `meanLogF0`; the cluster width tracks the archive's F0 spread (new model stat
   `meanLogF0Sq`), with a ~20% pull toward unison/octave/fifth. Sparse archive =
   near unison; varied archive = wider, occasionally consonant cluster.
-- **Breathing** amplitude arcs (smoothed ~3 s glide), not a sustained pad.
+- **Breathing** amplitude arcs: narrow range (~0.66..0.86, no near-silence dips),
+  smoothed ~5 s glide, reduced envelope movement — a calm, quiet body. MELOS is
+  deliberately quiet (`MELOS_GAIN = 0.13`) as a supporting layer under LOGOS.
 - After a recording, MELOS briefly "chews" that voice's F0/vowel/breath, then
   dissolves it into the collective.
 - The LOGOS->MELOS **amplitude sidechain was removed** (no volume pumping). LOGOS
@@ -50,6 +52,26 @@ LOGOS tweak below.
   (per-sample sources + SVF), `melosVowelPosition()`, `melosFormantTargets()`,
   `melosNearestConsonant()`, `melosComputeFormantCoeffs()`. The coupling hooks
   (`exciteMelosFromLogos`, `followLogosEnvelope`) are reused.
+
+### MELOS: timbral movement (Pink-Trombone-inspired)
+
+Autonomous but anchored to archive-set centers (archive defines *where* the body
+sits; slow autonomous drift gives life *around* it):
+
+- **Nasality (velum):** a 4th resonator (`MELOS_NASAL_FREQ` ~270 Hz murmur pole),
+  state `melosNasal`, blended into the output as `mouthOut = formantOut*(1-0.6*n)
+  + nasalBP*2.0*n`. Drifts toward an archive center (darker/hummed = more nasal).
+- **Wandering constriction:** `melosConstrictAuto` — occasional autonomous swells
+  raise F3 + breath ("almost-consonants"); adds to the LOGOS-driven constriction.
+- **Vowel micro-wander:** `melosVowelWander` random-walks around the archive vowel
+  (`MELOS_VOWEL_WANDER`).
+- **Sub-choirs:** `melosVoiceBright[v]` biases half the 6 voices darker, half
+  brighter (varied mouths) — static richness, not movement.
+
+NOTE (as of this snapshot): these are tuned **exaggerated** so the movement is
+clearly audible while tuning (the small/uniform archive otherwise keeps the
+archive-driven centers near-static). Expect to dial vowel wander / nasal depth /
+constriction frequency **down** toward a calm body once confirmed audible.
 
 ### LOGOS: rare intelligible words (new)
 
@@ -82,6 +104,35 @@ current detector over every `Wxxxx.WAV` and rewrites `GRAINS.CSV` from scratch
 otherwise, so run `x` once after changing the detector to migrate the whole
 archive. Playback is stopped during the rebuild; MELOS keeps humming (no SD).
 
+## Mastering: per-channel EQ + limiter (`AudioMaster`)
+
+A custom `AudioStream` (`AudioMaster`, with RBJ `MasterBiquad` stages + a
+peak-following soft limiter) is inserted on each output bus:
+`leftMixer -> masterL -> i2sOut.0` and `rightMixer -> masterR -> i2sOut.1`.
+
+- **LOGOS -> internal speaker (`masterL`):** HP 90 Hz + a +2.5 dB presence bell at
+  3 kHz (word clarity). Limiter ceiling 0.92.
+- **MELOS -> surface exciter on the steel cube (`masterR`):** HP **150 Hz only**.
+  The cube is **31 cm x 31 cm x 31 cm, 1.5 mm steel**; its panel bending
+  fundamental is ~130-180 Hz (it barely radiates below that), so the HP is purely
+  protective. The metallic ring (2-6 kHz) is **intentionally NOT tamed** — the
+  artist wants the steel to sing; the cube is part of the instrument. Limiter
+  ceiling 0.90.
+- DC blockers (`DC_BLOCK_R`, ~3.5 Hz) on each LOGOS stream (`LogosStream.dcX1/Y1`)
+  and on MELOS (`melosDcX1/Y1`). LOGOS needs it because the SGTL5000 ADC high-pass
+  is disabled, so recordings can carry DC into the exciter.
+
+Do NOT re-add harshness EQ on `masterR` without checking with the artist — the
+ring is wanted. If a specific resonance is ever too much, add a narrow notch at
+that exact frequency, not a broad cut.
+
+## Serial commands (added in this build)
+
+- `x` = rebuild `GRAINS.CSV` from the whole archive with the current slicer.
+- `y` = 30 s log sweep 60 Hz -> 8 kHz on the right (exciter) channel, printing
+  the frequency, to find the cube's resonances by ear (e.g. to notch, or to tune
+  MELOS pitch toward them so the steel rings in sympathy — a future idea).
+
 ## Model Change
 
 `MODEL_VERSION` bumped to **2** (added `float meanLogF0Sq` after `meanLogF0`).
@@ -91,10 +142,17 @@ are not touched.
 
 ## Key Tunables
 
-- MELOS: `MELOS_VOICE_COUNT` (6), `MELOS_SPREAD_MAX_SEMITONES` (7),
-  `MELOS_CONSONANCE_PULL` (0.20), `MELOS_MAKEUP` (2.2), `MELOS_BREATH_EASE`
-  (~3 s), `MELOS_GAIN` (0.525).
-- LOGOS words: `LOGOS_WORD_PERCENT` (25). Lower = rarer words, higher = more.
+- MELOS level/body: `MELOS_GAIN` (0.13), `MELOS_MAKEUP` (2.2),
+  `MELOS_BREATH_EASE` (~5 s), `MELOS_VOICE_COUNT` (6),
+  `MELOS_SPREAD_MAX_SEMITONES` (7), `MELOS_CONSONANCE_PULL` (0.20).
+- MELOS timbral movement (currently exaggerated): `MELOS_VOWEL_WANDER` (0.40),
+  `MELOS_NASAL_EASE`, nasal blend depth in `mouthOut`, constriction interval /
+  depth in `melosBlockUpdate`, `melosVoiceBright` split (±0.22).
+- LOGOS words: `LOGOS_WORD_PERCENT` (25).
+- LOGOS slicing: `LOGOS_HYST_FACTOR`, `LOGOS_SPLIT_SEARCH_MS`,
+  `LOGOS_ZC_SEARCH_SAMPLES`.
+- Mastering: per-bus EQ + limiter `ceiling` in `setup()`; exciter EQ kept
+  minimal on purpose (steel ring is wanted).
 
 ## Fallback
 
