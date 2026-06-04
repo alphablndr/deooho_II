@@ -509,6 +509,9 @@ float melosVowelWander = 0.0f;                      // slow autonomous vowel dri
 float melosVoiceBright[MELOS_VOICE_COUNT];          // sub-choir brightness bias per voice
 
 bool diagnosticToneOn = false;
+bool melosSweep = false;
+uint32_t melosSweepStartMs = 0;
+uint32_t melosSweepLastPrintMs = 0;
 uint32_t lastLedToggleMs = 0;
 bool ledBlinkState = false;
 uint32_t rngState = 0x12345678UL;
@@ -2823,6 +2826,51 @@ void rebuildGrainsFromArchive() {
   enterState(IDLE);
 }
 
+// Log-sweep tone (60 Hz -> 8 kHz, 30 s) on the right channel only, so you can
+// hear which frequencies the steel cube rings/booms at and notch them.
+void startMelosSweep() {
+  if (state != IDLE) {
+    Serial.println("Sweep ignored (busy).");
+    return;
+  }
+  stopAllPlayback();
+  diagnosticToneOn = true;        // pause LOGOS/MELOS during the sweep
+  leftMixer.gain(3, 0.0f);        // tone only on the exciter (right) side
+  rightMixer.gain(1, 0.7f);
+  diagnosticTone.frequency(60.0f);
+  diagnosticTone.amplitude(0.25f);
+  melosSweep = true;
+  melosSweepStartMs = millis();
+  melosSweepLastPrintMs = 0;
+  Serial.println("Exciter sweep 60 Hz -> 8 kHz over 30 s (right channel). Note ringing/booming Hz.");
+}
+
+void updateMelosSweep() {
+  if (!melosSweep) {
+    return;
+  }
+  const uint32_t now = millis();
+  const float t = static_cast<float>(now - melosSweepStartMs) / 30000.0f;
+  if (t >= 1.0f) {
+    diagnosticTone.amplitude(0.0f);
+    melosSweep = false;
+    diagnosticToneOn = false;
+    leftMixer.gain(3, 0.8f);      // restore default tone routing
+    rightMixer.gain(1, 0.8f);
+    melosQueuedFreshAudio = false;
+    initializeLogosSchedulers();
+    Serial.println("Sweep done.");
+    return;
+  }
+  const float freq = 60.0f * powf(8000.0f / 60.0f, t);
+  diagnosticTone.frequency(freq);
+  if (now - melosSweepLastPrintMs >= 700) {
+    melosSweepLastPrintMs = now;
+    Serial.print("sweep Hz: ");
+    Serial.println(freq, 0);
+  }
+}
+
 void handleSerial() {
   while (Serial.available() > 0) {
     const char command = Serial.read();
@@ -2854,6 +2902,8 @@ void handleSerial() {
       Serial.println("MELOS is live-synthesized; nothing to render.");
     } else if (command == 'x' || command == 'X') {
       rebuildGrainsFromArchive();
+    } else if (command == 'y' || command == 'Y') {
+      startMelosSweep();
     }
   }
 }
@@ -2921,10 +2971,12 @@ void setup() {
   masterL.stage[1].setPeaking(3000.0f, 1.0f, 2.5f);
   masterL.stages = 2;
   masterL.ceiling = 0.92f;
-  // MELOS -> surface exciter: drop useless bass, tame metal harshness 2-5 kHz.
-  masterR.stage[0].setHighpass(175.0f, 0.707f);
-  masterR.stage[1].setPeaking(3500.0f, 1.2f, -3.5f);
-  masterR.stages = 2;
+  // MELOS -> 31 cm / 1.5 mm steel cube exciter. Panel bending fundamental is
+  // ~130-180 Hz (it barely radiates below that), and thin steel rings 2-6 kHz.
+  masterR.stage[0].setHighpass(150.0f, 0.707f);     // below the panel fundamental
+  masterR.stage[1].setPeaking(3000.0f, 1.0f, -3.0f);  // tame metallic ring (low)
+  masterR.stage[2].setPeaking(5200.0f, 1.2f, -2.5f);  // tame metallic ring (top)
+  masterR.stages = 3;
   masterR.ceiling = 0.88f;
 
   if (USE_MAX4466_LINEIN) {
@@ -2970,7 +3022,7 @@ void setup() {
   Serial.print("LOGOS grains: ");
   Serial.println(grainCount);
   Serial.println("Record button pin 32: hold to record, release to process.");
-  Serial.println("Serial: r=record toggle, s=stop, t=tone, m=model, g=grains, n=LOGOS now, e=(no render), x=rebuild grains.");
+  Serial.println("Serial: r=record toggle, s=stop, t=tone, m=model, g=grains, n=LOGOS now, e=(no render), x=rebuild grains, y=exciter sweep.");
   Serial.println("MELOS is real-time synthesized; LOGOS is a 4-stream PSRAM crowd with reverse/rate.");
 
   enterState(IDLE);
@@ -2993,6 +3045,7 @@ void loop() {
     }
   }
 
+  updateMelosSweep();
   updateIdlePlayback();
   updateStatusLed();
 }
