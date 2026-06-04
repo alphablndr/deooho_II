@@ -2971,13 +2971,13 @@ void setup() {
   masterL.stage[1].setPeaking(3000.0f, 1.0f, 2.5f);
   masterL.stages = 2;
   masterL.ceiling = 0.92f;
-  // MELOS -> 31 cm / 1.5 mm steel cube exciter. Panel bending fundamental is
-  // ~130-180 Hz (it barely radiates below that), and thin steel rings 2-6 kHz.
-  masterR.stage[0].setHighpass(150.0f, 0.707f);     // below the panel fundamental
-  masterR.stage[1].setPeaking(3000.0f, 1.0f, -3.0f);  // tame metallic ring (low)
-  masterR.stage[2].setPeaking(5200.0f, 1.2f, -2.5f);  // tame metallic ring (top)
-  masterR.stages = 3;
-  masterR.ceiling = 0.88f;
+  // MELOS -> 31 cm / 1.5 mm steel cube exciter. The metallic ring is WANTED
+  // (the cube is the instrument), so we do NOT tame 2-6 kHz. Only a protective
+  // high-pass below the panel fundamental (~130-180 Hz, where it can't radiate
+  // anyway) + the limiter to keep the driver safe. Let the steel sing.
+  masterR.stage[0].setHighpass(150.0f, 0.707f);
+  masterR.stages = 1;
+  masterR.ceiling = 0.90f;
 
   if (USE_MAX4466_LINEIN) {
     audioShield.inputSelect(AUDIO_INPUT_LINEIN);
