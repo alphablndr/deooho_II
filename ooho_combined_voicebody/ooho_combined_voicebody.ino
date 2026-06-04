@@ -115,11 +115,11 @@ constexpr float MELOS_BREATH_EASE = 1.0f / (5.0f * SAMPLE_RATE);  // ~5 s glide,
 constexpr float MELOS_MAKEUP = 2.2f;               // post-formant makeup before soft clip
 // Timbral movement (Pink-Trombone-inspired): nasality, wandering constriction,
 // vowel micro-wander. All drift autonomously but around archive-set centers.
-constexpr float MELOS_NASAL_EASE = 1.0f / (6.0f * SAMPLE_RATE);
+constexpr float MELOS_NASAL_EASE = 1.0f / (3.5f * SAMPLE_RATE);
 constexpr float MELOS_NASAL_FREQ = 270.0f;         // nasal murmur pole
 constexpr float MELOS_NASAL_Q = 7.0f;
-constexpr float MELOS_CONSTRICT_EASE = 1.0f / (4.0f * SAMPLE_RATE);
-constexpr float MELOS_VOWEL_WANDER = 0.15f;        // max autonomous vowel drift
+constexpr float MELOS_CONSTRICT_EASE = 1.0f / (3.0f * SAMPLE_RATE);
+constexpr float MELOS_VOWEL_WANDER = 0.40f;        // max autonomous vowel drift (audible)
 constexpr uint32_t MELOS_MODE_MIN_MS = 20000;
 constexpr uint32_t MELOS_MODE_MAX_MS = 90000;
 constexpr uint32_t MELOS_CONSTRICTION_MIN_MS = 12000;
@@ -1835,22 +1835,22 @@ void melosBlockUpdate() {
   }
 
   // Autonomous timbral movement (bounded, around archive-set centers).
-  melosVowelWander += nextRandomGaussian(0.0010f);
+  melosVowelWander += nextRandomGaussian(0.0026f);
   melosVowelWander = constrain(melosVowelWander, -MELOS_VOWEL_WANDER, MELOS_VOWEL_WANDER);
 
   // Nasality drifts toward an archive-set center (darker/hummed archive = more nasal).
   const float nasalCenter = constrain(0.16f + (1.0f - melosVowelPos) * 0.34f + melosVoicedRatio * 0.16f, 0.0f, 0.72f);
   melosNasalTarget += (nasalCenter - melosNasalTarget) * (MELOS_NASAL_EASE * blk);
-  melosNasalTarget += nextRandomGaussian(0.0009f);
-  melosNasalTarget = constrain(melosNasalTarget, 0.0f, 0.85f);
+  melosNasalTarget += nextRandomGaussian(0.0030f);
+  melosNasalTarget = constrain(melosNasalTarget, 0.0f, 0.95f);
   melosNasal += (melosNasalTarget - melosNasal) * (MELOS_NASAL_EASE * blk);
 
   // Wandering constriction: rare gentle swells -> "almost-consonants".
   if (melosSampleCounter >= melosConstrictNextSample) {
     const float rr = static_cast<float>(nextRandomU32() & 0xFFFFUL) / 65535.0f;
     const float rr2 = static_cast<float>(nextRandomU32() & 0xFFFFUL) / 65535.0f;
-    melosConstrictAutoTarget = rr < 0.55f ? 0.0f : (0.12f + 0.33f * rr2);
-    melosConstrictNextSample = melosSampleCounter + melosRandomSamples(2500, 11000);
+    melosConstrictAutoTarget = rr < 0.40f ? 0.0f : (0.22f + 0.55f * rr2);
+    melosConstrictNextSample = melosSampleCounter + melosRandomSamples(1500, 6000);
   }
   melosConstrictAuto += (melosConstrictAutoTarget - melosConstrictAuto) * (MELOS_CONSTRICT_EASE * blk);
 
@@ -1863,7 +1863,7 @@ void melosBlockUpdate() {
   float f1, f2, f3;
   melosFormantTargets(melosVowelPos, f1, f2, f3);
   const float constr = constrain(melosConstriction + melosLogosConstrict + melosConstrictAuto, 0.0f, 1.0f);
-  f3 += constr * 400.0f;
+  f3 += constr * 750.0f;
   melosFormantFreq[0] += (f1 - melosFormantFreq[0]) * (MELOS_VOWEL_EASE * blk);
   melosFormantFreq[1] += (f2 - melosFormantFreq[1]) * (MELOS_VOWEL_EASE * blk);
   melosFormantFreq[2] += (f3 - melosFormantFreq[2]) * (MELOS_VOWEL_EASE * blk);
@@ -1992,7 +1992,7 @@ float melosNextSample() {
   const float nv2 = melosNasalS2 + melosNasalA2 * melosNasalS1 + melosNasalA3 * nv3;
   melosNasalS1 = 2.0f * nv1 - melosNasalS1;
   melosNasalS2 = 2.0f * nv2 - melosNasalS2;
-  const float mouthOut = formantOut * (1.0f - 0.5f * melosNasal) + nv1 * 1.3f * melosNasal;
+  const float mouthOut = formantOut * (1.0f - 0.6f * melosNasal) + nv1 * 2.0f * melosNasal;
 
   // Slow archive envelope shaping + breathing arc.
   melosEnvPhase += MELOS_ENV_INC;
