@@ -41,11 +41,23 @@ public:
   float ceiling = 0.9f;
   float limEnv = 0.0f;
   float limGain = 1.0f;
+  // Output fade, set from loop() via fadeTo(). Applied per sample at the very
+  // end of the chain, so it acts at once (no play-queue latency) and without
+  // clicks. Used to silence the cube while it records.
+  volatile float levelTarget = 1.0f;
+  volatile float levelStep = 1.0f;
+  float level = 1.0f;
+  void fadeTo(float target, float seconds) {
+    levelStep = seconds > 0.0f ? 1.0f / (seconds * SAMPLE_RATE) : 1.0f;
+    levelTarget = target;
+  }
   virtual void update(void) {
     audio_block_t *block = receiveWritable(0);
     if (!block) {
       return;
     }
+    const float target = levelTarget;
+    const float step = levelStep;
     for (int i = 0; i < AUDIO_BLOCK_SAMPLES; ++i) {
       float x = block->data[i] * (1.0f / 32768.0f);
       for (uint8_t s = 0; s < stages; ++s) {
@@ -57,6 +69,12 @@ public:
       const float g = limEnv > ceiling ? ceiling / limEnv : 1.0f;
       limGain += (g - limGain) * (g < limGain ? 0.5f : 0.004f);
       x *= limGain;
+      if (level < target) {
+        level = min(level + step, target);
+      } else if (level > target) {
+        level = max(level - step, target);
+      }
+      x *= level * level;  // squared ramp: gentler start of the fade-in
       if (x > 1.0f) {
         x = 1.0f;
       } else if (x < -1.0f) {
@@ -126,6 +144,9 @@ uint8_t *activeRecordBuffer = internalRecordBuffer;
 size_t activeRecordCapacity = INTERNAL_RECORD_BYTES;
 uint32_t activeRecordSeconds = INTERNAL_RECORD_SECONDS;
 size_t recordBytesUsed = 0;
+size_t recordSkipBytesLeft = 0;  // start-of-take bytes still to discard
+uint32_t grainSelectLastUs = 0;  // time spent choosing the last LOGOS grain
+uint32_t grainSelectMaxUs = 0;
 uint32_t recordingStartedMs = 0;
 bool recordOverflow = false;
 bool usingPsramBuffer = false;

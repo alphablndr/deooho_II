@@ -152,6 +152,10 @@ void printDiagnostics() {
   Serial.print(", nextWav: ");
   makeFilename(currentFilename, nextIndex);
   Serial.println(currentFilename);
+  Serial.print("  grainSelect us last/max: ");
+  Serial.print(grainSelectLastUs);
+  Serial.print(" / ");
+  Serial.println(grainSelectMaxUs);
   Serial.print("  logosDensity: ");
   Serial.print(logosDensityModeName());
   Serial.print(", activeStreams: ");
@@ -344,7 +348,7 @@ void setup() {
 
   Serial.begin(115200);
   delay(500);
-  Serial.println("The Ooho II - emergent build (Claude Code branch)");
+  Serial.println("The Ooho II - voicebody build");
 
   for (uint8_t i = 0; i < LOGOS_STREAM_COUNT; ++i) {
     logosStreams[i].buffer = logosGrainBuffers[i];

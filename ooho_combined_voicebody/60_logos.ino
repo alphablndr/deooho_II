@@ -358,7 +358,19 @@ bool selectRecentRecordingGrain(GrainInfo &grain) {
   return found;
 }
 
+// Timed wrapper: the CSV scan blocks loop() while play queues drain, so `d`
+// reports how long a grain choice takes.
 bool selectRandomGrain(GrainInfo &grain) {
+  const uint32_t t0 = micros();
+  const bool found = selectRandomGrainFromCsv(grain);
+  grainSelectLastUs = micros() - t0;
+  if (grainSelectLastUs > grainSelectMaxUs) {
+    grainSelectMaxUs = grainSelectLastUs;
+  }
+  return found;
+}
+
+bool selectRandomGrainFromCsv(GrainInfo &grain) {
   grainCount = countGrains();
   if (grainCount == 0) {
     return false;

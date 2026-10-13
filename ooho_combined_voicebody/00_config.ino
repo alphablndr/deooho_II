@@ -15,6 +15,15 @@ constexpr uint32_t MAX_RECORD_MS = FIELD_RECORD_SECONDS * 1000UL;
 constexpr size_t INTERNAL_RECORD_BYTES = SAMPLE_RATE * 2UL * INTERNAL_RECORD_SECONDS;
 constexpr size_t FIELD_RECORD_BYTES = SAMPLE_RATE * 2UL * FIELD_RECORD_SECONDS;
 
+// Clean takes (SD card analysis 2026-10-13: the button release click sits in
+// the last ~40 ms of a take, up to 160 ms; the cube's own sound bled into
+// every pause).
+constexpr uint32_t RECORD_TRIM_START_MS = 80;   // cube fade-out tail + press click
+constexpr uint32_t RECORD_TRIM_END_MS = 100;    // release click, recorded before debounce confirms
+constexpr uint32_t RECORD_MIN_SAVE_MS = 400;    // after trimming (~0.6 s button hold)
+constexpr float OUTPUT_DUCK_SECONDS = 0.06f;    // cube falls silent when recording starts
+constexpr float OUTPUT_RETURN_SECONDS = 1.5f;   // and comes back after release
+
 constexpr uint32_t MODEL_MAGIC = 0x4F4F484FUL;  // "OOHO"
 constexpr uint16_t MODEL_VERSION = 2;
 constexpr uint8_t ENV_BINS = 64;
@@ -320,6 +329,7 @@ bool saveRawRecording();
 void startRecording();
 bool processRecording();
 void stopRecording();
+void setOutputLevel(float target, float seconds);
 
 uint32_t nextRandomU32();
 float nextRandomBipolar();
@@ -370,6 +380,7 @@ bool isRecentGrainIndex(uint32_t index);
 void rememberGrainIndex(uint32_t index);
 bool isRecentRecordingFilename(const char *filename);
 bool selectRecentRecordingGrain(GrainInfo &grain);
+bool selectRandomGrainFromCsv(GrainInfo &grain);
 bool selectRandomGrain(GrainInfo &grain);
 bool appendGrain(const char *filename, uint32_t startMs, uint32_t durationMs);
 

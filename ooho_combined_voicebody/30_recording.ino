@@ -66,7 +66,11 @@ void updateButton(DebouncedButton &button) {
 void drainRecordQueue() {
   while (recordQueue.available() > 0) {
     const uint8_t *block = reinterpret_cast<const uint8_t *>(recordQueue.readBuffer());
-    if (recordBytesUsed + 256 <= activeRecordCapacity) {
+    if (recordSkipBytesLeft > 0) {
+      // Start of the take: the cube is still fading out and the press click
+      // may ring through the shell. Drop these blocks.
+      recordSkipBytesLeft = recordSkipBytesLeft > 256 ? recordSkipBytesLeft - 256 : 0;
+    } else if (recordBytesUsed + 256 <= activeRecordCapacity) {
       memcpy(activeRecordBuffer + recordBytesUsed, block, 256);
       recordBytesUsed += 256;
     } else {
@@ -83,6 +87,11 @@ void stopLogosPlayback() {
     logosStreams[i].blockReady = false;
     logosMixer.gain(i, 0.0f);
   }
+}
+
+void setOutputLevel(float target, float seconds) {
+  masterL.fadeTo(target, seconds);
+  masterR.fadeTo(target, seconds);
 }
 
 void stopAllPlayback() {
@@ -150,10 +159,12 @@ void startRecording() {
     return;
   }
   recordBytesUsed = 0;
+  recordSkipBytesLeft = RECORD_TRIM_START_MS * (SAMPLE_RATE / 1000UL) * 2UL;
   recordingStartedMs = millis();
   recordOverflow = false;
   AudioProcessorUsageMaxReset();
   AudioMemoryUsageMaxReset();
+  setOutputLevel(0.0f, OUTPUT_DUCK_SECONDS);  // the cube falls silent to listen
   recordQueue.begin();
   enterState(RECORDING);
   Serial.print("Recording to ");
@@ -203,11 +214,26 @@ bool processRecording() {
 void stopRecording() {
   recordQueue.end();
   drainRecordQueue();
+  setOutputLevel(1.0f, OUTPUT_RETURN_SECONDS);
+
+  // The release click is recorded before the debounce confirms the release.
+  const size_t endTrimBytes = RECORD_TRIM_END_MS * (SAMPLE_RATE / 1000UL) * 2UL;
+  recordBytesUsed = recordBytesUsed > endTrimBytes ? recordBytesUsed - endTrimBytes : 0;
+  const uint32_t keptMs = static_cast<uint32_t>((recordBytesUsed / 2UL) * 1000UL / SAMPLE_RATE);
   Serial.print("Recording stopped: ");
   Serial.print(recordBytesUsed);
   Serial.print("/");
   Serial.print(activeRecordCapacity);
-  Serial.println(recordOverflow ? " bytes, overflow clipped." : " bytes.");
+  Serial.print(recordOverflow ? " bytes, overflow clipped" : " bytes");
+  Serial.print(" (");
+  Serial.print(keptMs);
+  Serial.println(" ms after trim).");
+
+  if (keptMs < RECORD_MIN_SAVE_MS) {
+    Serial.println("Take too short; not saved.");
+    enterState(IDLE);
+    return;
+  }
 
   if (!processRecording()) {
     enterState(ERROR_STATE);
