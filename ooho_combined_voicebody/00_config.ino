@@ -326,6 +326,7 @@ void drainRecordQueue();
 void stopLogosPlayback();
 void stopAllPlayback();
 bool saveRawRecording();
+void removeBlockRateHum();
 void startRecording();
 bool processRecording();
 void stopRecording();
