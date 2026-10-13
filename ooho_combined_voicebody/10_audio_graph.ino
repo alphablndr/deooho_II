@@ -74,7 +74,7 @@ public:
       } else if (level > target) {
         level = max(level - step, target);
       }
-      x *= level * level;  // squared ramp: gentler start of the fade-in
+      x *= level * level * (3.0f - 2.0f * level);  // S-curve: soft start and end both ways
       if (x > 1.0f) {
         x = 1.0f;
       } else if (x < -1.0f) {

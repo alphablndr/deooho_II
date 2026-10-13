@@ -21,7 +21,7 @@ constexpr size_t FIELD_RECORD_BYTES = SAMPLE_RATE * 2UL * FIELD_RECORD_SECONDS;
 constexpr uint32_t RECORD_TRIM_START_MS = 80;   // cube fade-out tail + press click
 constexpr uint32_t RECORD_TRIM_END_MS = 100;    // release click, recorded before debounce confirms
 constexpr uint32_t RECORD_MIN_SAVE_MS = 400;    // after trimming (~0.6 s button hold)
-constexpr float OUTPUT_DUCK_SECONDS = 0.06f;    // cube falls silent when recording starts
+constexpr float OUTPUT_DUCK_SECONDS = 0.35f;    // cube falls silent when recording starts (gently)
 constexpr float OUTPUT_RETURN_SECONDS = 1.5f;   // and comes back after release
 
 constexpr uint32_t MODEL_MAGIC = 0x4F4F484FUL;  // "OOHO"
