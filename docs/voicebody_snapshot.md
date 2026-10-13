@@ -4,6 +4,11 @@ Saved 2026-06-03. This is the Claude Code branch that rebuilds **MELOS** as a
 collective vocal body. Full design + as-built tuning:
 [`docs/superpowers/specs/2026-06-03-melos-collective-voice-body-design.md`](superpowers/specs/2026-06-03-melos-collective-voice-body-design.md).
 
+> **Snapshot folders moved to git history (2026-10-13).** Every
+> `ooho_combined_voicebody_pre_*/` folder mentioned below was removed from the
+> working tree; all of them are preserved in commit `6649f1d`. To restore one:
+> `git checkout 6649f1d -- ooho_combined_voicebody_pre_<name>/`
+
 ## Sketch
 
 - Active build: `ooho_combined_voicebody/ooho_combined_voicebody.ino`

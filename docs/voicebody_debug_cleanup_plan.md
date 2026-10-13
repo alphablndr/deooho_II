@@ -2,6 +2,11 @@
 
 Saved 2026-06-04 after the first safe cleanup pass.
 
+> **Snapshot folders moved to git history (2026-10-13).** Every
+> `ooho_combined_voicebody_pre_*/` folder mentioned below was removed from the
+> working tree; all of them are preserved in commit `6649f1d`. To restore one:
+> `git checkout 6649f1d -- ooho_combined_voicebody_pre_<name>/`
+
 ## Current Active Build
 
 - Sketch: `ooho_combined_voicebody/ooho_combined_voicebody.ino`
