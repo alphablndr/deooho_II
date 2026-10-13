@@ -4,6 +4,8 @@ Firmware and bench-test sketches for **The Ooho II**, a portable sound-art devic
 
 Current practical workflow: **incremental bring-up builds**. Do not debug the full LOGOS/MELOS firmware until the simple hardware layers pass.
 
+**Pre-exhibition work list (voicebody, Oct 2026):** [`docs/exhibition_todo.md`](docs/exhibition_todo.md).
+
 Current stable integrated lab build:
 
 ```text
