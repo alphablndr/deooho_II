@@ -44,12 +44,13 @@ Checks:
 - `sd_smoke_test` initializes `BUILTIN_SDCARD`, writes, reads, and deletes `TEST.TXT`;
 - `psram_memtest` reports detected PSRAM and passes memory patterns.
 
-## Stage 3-5 - Record Raw, Playback, Grain Index
+## Stage 3-5 - Record Raw, Simple Archive, Grain Index
 
 Sketch:
 
 ```text
 record_raw_test
+ooho_simple_random
 ```
 
 Checks:
@@ -57,9 +58,25 @@ Checks:
 - hold pin 32 button = record to PSRAM/RAM only;
 - release = save `Wxxxx.WAV`;
 - max recording time is 30 seconds;
-- Serial `p` plays latest full WAV;
 - Serial `s` stops playback or recording;
+
+For `record_raw_test`:
+
+- Serial `p` plays latest full WAV;
 - `GRAINS.CSV` gets LOGOS grain candidates.
+
+For the simple two-button version, use `ooho_simple_random` after `record_raw_test`
+passes. It keeps PSRAM-first recording but removes `GRAINS.CSV`/LOGOS analysis.
+
+`ooho_simple_random` behavior:
+
+- pin `32` records mono WAV files;
+- pin `30` randomly plays one existing `Wxxxx.WAV` from the whole archive;
+- random playback avoids immediate repeats when the archive has at least two files;
+- mono playback is duplicated to both line-out channels;
+- post-record cleanup/normalization runs before saving;
+- takes shorter than `500 ms`, or too quiet (`rms < 0.006` and `peak < 0.025`), are ignored;
+- playback uses a separate gain stage (`PLAYBACK_GAIN = 1.35`).
 
 This sketch intentionally has no MELOS, no model, and no idle playback.
 

@@ -137,6 +137,7 @@ tone_button_test  -> verify Audio Shield output / amp / speaker
 sd_smoke_test     -> verify built-in Teensy SD slot
 psram_memtest     -> verify soldered PSRAM
 record_raw_test   -> verify PSRAM-first recording, WAV save, serial playback, GRAINS.CSV
+ooho_simple_random -> current simple two-button version: record on pin 32, random archive playback on pin 30
 logos_one_stream_test -> verify manual LOGOS grain playback
 melos_short_test  -> verify short MELOS render/playback
 ooho_combined_test -> current stable integrated Stage 8 baseline
@@ -146,6 +147,23 @@ the_ooho_rev1     -> full experimental field firmware
 ```
 
 The safest recording-only debug build is `record_raw_test`, because it records and saves real WAV files without MELOS/model/idle complexity. The safest integrated artistic debug build is currently `ooho_combined_test`.
+
+### `ooho_simple_random/ooho_simple_random.ino`
+
+Simple two-button OOHO version, separate from the cube/collective-voice firmware.
+
+Behavior:
+
+- Record button on pin `32`: hold to record, release to save `Wxxxx.WAV`.
+- Playback button on pin `30`: press to choose one existing `Wxxxx.WAV` at random from the full archive and play it.
+- Random playback does not repeat the same recording twice in a row when the archive has at least two files.
+- WAV archive is mono. Playback sends the mono signal to both line-out channels so either output path can be used.
+- Recording is still PSRAM-first; SD writes happen only after release.
+- Post-record voice cleanup runs in RAM before saving: SGTL5000 ADC high-pass, firmware high-pass/low-pass, soft noise-floor reduction, light compression, soft limiting, and RMS/peak normalization.
+- Bad takes are ignored instead of saved: shorter than `500 ms`, or too quiet (`rms < 0.006` and `peak < 0.025`).
+- Playback has a separate gain stage (`PLAYBACK_GAIN = 1.35`) so archived voices come back a little louder without changing the recording path.
+- No `GRAINS.CSV`, no `MODEL.BIN`, no `MELOS.WAV`, no LOGOS/MELOS processing.
+- Optional LEDs: record/status on pin `31`, playback on pin `29`.
 
 ### `the_ooho_rev1/the_ooho_rev1.ino`
 

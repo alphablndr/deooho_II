@@ -16,3 +16,6 @@ build/
 # Local editor state
 .vscode/
 .idea/
+
+# Python cache
+__pycache__/

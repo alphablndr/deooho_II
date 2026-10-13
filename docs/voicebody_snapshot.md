@@ -73,6 +73,88 @@ clearly audible while tuning (the small/uniform archive otherwise keeps the
 archive-driven centers near-static). Expect to dial vowel wander / nasal depth /
 constriction frequency **down** toward a calm body once confirmed audible.
 
+### 2026-06-04: Explicit articulation layer
+
+Codex added a small Pink-Trombone-inspired articulation layer on top of the
+Claude `voicebody` engine. This is still not a Pink Trombone port and uses no
+external code; it only borrows the physical idea of a changing vocal tract:
+
+- `melosTonguePos`: archive spectral centroid becomes a slow tongue position
+  (`0 = back/dark`, `1 = front/bright`).
+- `melosTongueDiameter`: voiced/open archives and clear LOGOS gestures open the
+  mouth; dense/granular/reversed LOGOS gestures narrow it.
+- `melosConstrBack`, `melosConstrMid`, `melosConstrFront`: transient constriction
+  zones. Reversed LOGOS pushes back/nasal; granular/cloud LOGOS pushes mid/front
+  and adds a little fricative air; clear whole words stabilize/open MELOS.
+- The articulation changes formant targets, oral damping, nasality, and a small
+  front-fricative noise component. It does **not** add phoneme sequencing or
+  literal speech. Conceptually, LOGOS does not “control a synth parameter”; it
+  briefly deforms the collective mouth.
+
+A fallback copy of the previous build is saved in
+`ooho_combined_voicebody_pre_articulation/` and documented in
+`docs/voicebody_pre_articulation_snapshot.md`.
+
+### 2026-06-04: First cleanup pass
+
+Codex saved `ooho_combined_voicebody_pre_cleanup/`, then removed stale
+constants/global state left over from older additive/vocal-mode MELOS versions.
+The pass also updated the sketch header and added a section map. It did not
+change the audio graph, recording path, model format, LOGOS behavior, or MELOS
+sound design. The cleanup roadmap lives in
+`docs/voicebody_debug_cleanup_plan.md`.
+
+### 2026-06-04: Speech-ghost articulation bursts
+
+Codex saved `ooho_combined_voicebody_pre_speechghost/`, then added a small
+`speech ghost` layer to MELOS. The slow ambient vocal body remains the default,
+but LOGOS events and post-recording learning gestures can briefly wake a faster
+4-9 Hz jaw/tongue motor rhythm for roughly 1-4 seconds. This does not sequence
+phonemes or create intelligible speech. It only adds temporary offsets to the
+existing tongue position, tongue diameter, and back/mid/front constriction:
+
+- clear words: occasional soft opening/stabilizing speech-memory;
+- granular/cloud LOGOS: more frequent front/mid articulation bursts;
+- reversed LOGOS: darker back/nasal bursts;
+- dense LOGOS overlaps: slightly higher chance of a burst.
+
+Serial command `m` now prints `speechGhost/rate` for tuning. The fallback before
+this layer is documented in `docs/voicebody_pre_speechghost_snapshot.md`.
+
+### 2026-06-04: More active MELOS murmur
+
+After listening, MELOS still read as mostly ambient. Codex tuned the
+speech-ghost layer to make the collective body more present without turning it
+into constant speech:
+
+- post-recording speech-ghost is stronger and lasts longer;
+- LOGOS grains trigger speech-ghost more often, especially granular/reversed
+  fragments and dense overlaps;
+- speech-ghost tongue/diameter/constriction offsets are deeper;
+- MELOS now has rare autonomous murmur gestures every ~18-45 seconds, so the
+  body can remember speech even during quiet LOGOS gaps.
+
+### 2026-06-04: More synthetic-voice MELOS, still ambient
+
+Codex tuned MELOS halfway toward a clearer synthetic voice while preserving the
+ambient object-body:
+
+- reduced maximum pitch spread and increased consonance pull, so the six sources
+  read less like an abstract cloud and more like one synthetic throat;
+- added a very subtle 5 Hz vibrato/micro-instability, stronger during
+  speech-ghost and post-recording gestures;
+- raised formant Q/gain moderately for clearer vowel identity;
+- made the glottal source slightly brighter and reduced aspiration noise;
+- increased post-formant makeup slightly without changing output routing.
+
+### 2026-06-04: Tab refactor baseline
+
+The speech-ghost build was compiled, uploaded to Teensy 4.1, and reported as
+sounding normal. Codex saved `ooho_combined_voicebody_pre_tab_refactor/` before
+starting the Arduino tab split. The tab refactor is intended to change only
+readability and debug navigation; no model format, SD layout, audio routing,
+queue behavior, pins, or tuning constants should change.
+
 ### LOGOS: rare intelligible words (new)
 
 - `LOGOS_WORD_PERCENT` (currently 25): a grain on **any** stream may play as a
@@ -80,6 +162,172 @@ constriction frequency **down** toward a calm body once confirmed audible.
   cloud/micro deconstruction so clear words never slip through by accident. Words
   emerge from the texture; absolute frequency still breathes with the density
   mode.
+
+### 2026-06-04: LOGOS call-and-response + reverse tails
+
+Codex added two LOGOS deconstruction gestures:
+
+- **Call-and-response:** after some clear words, another LOGOS stream answers
+  180-820 ms later with a short reversed/micro fragment from the same grain.
+- **Reverse tails:** after some clear words finish, the same stream may play the
+  end of that word backwards as a quiet object-memory tail.
+
+Both gestures reuse the existing PSRAM grain player and only start new SD reads
+while idle, preserving the no-SD-write-during-recording rule and avoiding new
+audio routing.
+
+### 2026-06-04: LOGOS phrase ghosts + musical rates
+
+Added two more LOGOS gestures on top of the response build:
+
+- **Phrase ghosts:** automatic LOGOS playback can sometimes expand a selected
+  word into a 1.5-4.0 s source window around it, then slice that longer window
+  into a cloud of syllable/dust/scrub voices. The result should feel like a
+  human phrase passing through the object, but without returning language as
+  readable sentence meaning. Tunables: `LOGOS_PHRASE_GHOST_PERCENT`,
+  `LOGOS_PHRASE_MIN_MS`, `LOGOS_PHRASE_MAX_MS`,
+  `LOGOS_PHRASE_PREROLL_MAX_MS`.
+- **Musical playback rates:** deconstructed LOGOS voices now choose from a more
+  interval-like set of rates: 0.5, 0.667, 0.75, 1.0, 1.333, 1.5, 2.0. This is
+  not true pitch shifting; speed and pitch move together, but the offsets are
+  closer to octave/fifth/fourth relationships and should make stutters/arps feel
+  more composed.
+
+The fallback before this change is `ooho_combined_voicebody_pre_phrase_ghosts/`.
+Because phrase ghosts can load up to four seconds into PSRAM, the per-stream
+LOGOS buffer is now sized from `LOGOS_PHRASE_MAX_MS` instead of
+`LOGOS_MAX_DURATION_MS`.
+
+### 2026-06-04: LOGOS archive-pressure density
+
+LOGOS density now follows archive size while preserving chance-heavy behavior at
+small archive sizes:
+
+- `logosArchivePressure()` maps `grainCount` to 0-100% against
+  `LOGOS_ARCHIVE_FULL_GRAINS` (currently 240 grains).
+- More archive pressure makes `swarm` mode more likely and `sparse` less likely,
+  but swarm still has a baseline chance even with a small archive so early field
+  versions can still suddenly feel crowded.
+- More archive pressure shortens LOGOS event intervals and dormant waits.
+- Cloud grains can add up to `LOGOS_ARCHIVE_VOICE_BOOST_MAX` extra voices on
+  non-anchor streams, so a large archive feels more like a crowd rather than only
+  a faster scheduler.
+- Serial diagnostics (`d`) prints `archivePressure` next to grain count.
+
+### MELOS reference: APEX / vocal tract modelling
+
+`musikinformatik/apex-sc-dafx` is a SuperCollider/C++ vocal-tract modelling
+project based around a KLVocalTract UGen and APEX data/examples. It is too large
+and GPL-oriented to directly copy into this firmware, but the useful idea for
+Ooho is conceptual and implementable: replace some of the current formant
+wandering with a lightweight **moving tract resonator** model, where slow changes
+in a few tract/area parameters produce vowel color by reflection/resonance rather
+than only by moving filter frequencies. Future MELOS work can prototype this as
+2-4 coupled resonator sections on Teensy, not a full port.
+
+### 2026-06-04: Lightweight moving tract resonator
+
+Implemented the first safe version of that idea in live MELOS:
+
+- Current source/formant/nasal synthesis stays intact.
+- A new three-section serial tract (`back / mid / front`) is inserted after the
+  formant+nasal mouth output.
+- Each section is a broad TPT state-variable resonator. The section frequencies
+  move slowly from the existing tongue position, tongue diameter, and
+  back/mid/front constriction state, so the sound gets cavity memory instead of
+  only parallel formant peaks.
+- This is not a direct Pink Trombone/APEX port. It is a lightweight object-body
+  approximation designed for Teensy CPU safety.
+- Main tunables: `MELOS_TRACT_BLEND`, `MELOS_TRACT_DRIVE`,
+  `MELOS_TRACT_Q`, `MELOS_TRACT_EASE`.
+- Serial `m` / `d` now print `tract Hz` for the three moving sections.
+
+Fallback before this change: `ooho_combined_voicebody_pre_moving_tract/`.
+
+### 2026-06-04: Pink-trombone-cpp articulation borrowings
+
+After inspecting `cutelabnyc/pink-trombone-cpp/src`, Ooho borrowed two small
+ideas rather than porting the full 44-section waveguide:
+
+- **Thinness/openness fricatives:** MELOS front/mid turbulence now follows a
+  Pink-Trombone-style window: a constriction must be narrow enough to hiss, but
+  not fully closed. This should make breath/noise feel more like articulating
+  tissue and less like plain white noise.
+- **Release transients:** when the moving tract releases from a strong
+  obstruction, a very short decaying impulse is injected into the tract. This is
+  a lightweight version of the transient behavior in Pink Trombone, meant to add
+  subtle mouth-release events without literal consonants.
+
+Debug `m` / `d` now also print tract `obstruction/transient`. Fallback before
+this change: `ooho_combined_voicebody_pre_ptcpp_articulation/`.
+
+### 2026-06-04: LF glottis lite
+
+MELOS source synthesis now borrows the core **LF glottal waveform** idea from
+Pink Trombone's `Glottis.cpp`:
+
+- The old primary source was a summed harmonic buzz per voice. It made the
+  formants speak sometimes, but the base character still read as synth.
+- The new source computes lightweight LF coefficients once per audio block from
+  `melosTenseness`, then each MELOS voice emits a glottal open/close pulse.
+- A very small 2nd/3rd harmonic edge remains to keep the pulse present on the
+  exciter, but the formants and moving tract are now driven by something closer
+  to vocal-fold motion.
+- Aspiration noise is modulated by glottal phase, so breath enters the tract in
+  a more voice-like rhythm instead of as plain steady noise.
+
+Main tunables: `MELOS_LF_TONE_GAIN`, `MELOS_LF_BRIGHT_GAIN`,
+`MELOS_LF_ASPIRATION_GAIN`, `MELOS_LF_MIN_RD`, `MELOS_LF_MAX_RD`.
+Fallback before this change: `ooho_combined_voicebody_pre_lf_glottis/`.
+
+### 2026-06-04: Lead glottis + syllabic motor
+
+After listening, LF glottis was too subtle because six equal MELOS voices
+averaged away the glottal closure and read as a synth pad. This build keeps the
+collective ambience but moves the voice identity into a foreground body:
+
+- The source is now **one lead LF glottis plus two quiet shadows**, not six equal
+  voices. `MELOS_LEAD_SOURCE_GAIN` carries the closure; shadows retain collective
+  breadth without smearing the pulse.
+- LF edge is stronger (`MELOS_LF_TONE_GAIN`, `MELOS_LF_BRIGHT_GAIN`) so the
+  formants and steel exciter receive a more voice-like excitation.
+- A short **syllabic motor** sometimes performs a 180-760 ms
+  open -> constrict -> release gesture. It is not phoneme sequencing; it is a
+  physical mouth movement that should make MELOS occasionally feel like it is
+  trying to speak.
+- LOGOS events and post-recording learning can trigger the syllabic motor, so
+  the archive and grains visibly deform the collective voice.
+- Serial `m` / `d` print `syllable amount/phase`.
+
+Fallback before this change: `ooho_combined_voicebody_pre_lead_glottis/`.
+
+### 2026-06-04: MELOS 2345 voice-body shaping
+
+Implemented the next musical MELOS layer without adding A/B debug controls:
+
+- **Vocal foreground events:** MELOS sometimes steps out of ambient mode for a
+  few seconds. Foreground tightens pitch spread, makes the lead glottis more
+  dominant than the shadows, raises formant presence, and increases moving-tract
+  blend. LOGOS density and post-recording learning can trigger these events.
+- **Vowel islands:** instead of endless vowel wandering, MELOS is gently pulled
+  toward recognisable vocal zones (`oo` / dark, open `aa`, brighter/front vowel,
+  etc.) for 7-22 second spans. The archive still biases the color, but the sound
+  should have more memorable states.
+- **Stronger assimilation:** after a recording is processed, MELOS now pulls
+  harder toward the incoming F0/brightness, enters foreground, triggers a breath
+  phrase, and sets the next vowel island from the dominant band of the new voice.
+- **Breath phrases:** short inhale -> voiced pulse -> release shapes add
+  human-like phrase energy to aspiration and amplitude without returning to a
+  simple pumping LFO.
+
+Debug `m` / `d` now print `foreground/vowelIsland/breathPhrase`. Fallback before
+this change: `ooho_combined_voicebody_pre_melos_2345/`.
+
+**Status:** reverted from the active firmware after listening. The previous
+lead-glottis/syllabic-motor MELOS was preferred; the 2345 foreground/vowel
+island/breath phrase layer made MELOS less desirable in the installation
+context. Keep this section as a record of the experiment, not as current active
+behavior.
 
 ### LOGOS: smarter grain slicing (`appendLogosGrains`)
 
