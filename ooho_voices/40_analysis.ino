@@ -484,6 +484,7 @@ void rebuildGrainsFromArchive() {
   }
 
   grainCount = countGrains();
+  initVoices();  // level, background and registers from the new syllable index
   Serial.print("Rebuild done: files=");
   Serial.print(filesDone);
   Serial.print(", grains=");
