@@ -5,8 +5,8 @@ Question: if real voices are cut into syllables (not into pauses-delimited
 chunks) and recombined by how they sound, do we get "almost-speech without
 words" that is more alive than random grain playback?
 
-Only original material: no speed change, no pitch shift, no reverse. Units are
-cut, reordered, faded and level-matched, nothing else.
+Only original material: no speed change, no pitch shift. Units are cut,
+reordered, faded, level-matched and sometimes reversed (Anton: keep reverse).
 
   A  corpus     cut every recording into syllables + descriptors
                 (pitch, voiced share, brightness, loudness, length)
@@ -36,6 +36,8 @@ EDGE_OVER_FLOOR = 1.8     # a syllable ends where the envelope falls below this
 MIN_PEAK_GAP_S = 0.11     # two nuclei closer than this are one syllable
 DIP_RATIO = 0.70          # the valley between two nuclei must dip below 70 % of the smaller one
 FADE_S = 0.010
+REVERSE_B = 0.20          # share of syllables played backwards in B
+REVERSE_C = 0.10          # ...and in C (lower: keeps the phrase's melody readable)
 F0_RANGE = (70.0, 400.0)
 
 
@@ -242,13 +244,15 @@ def render_collective(corpus, audio, sr, seconds, rng):
             f0_t = f0_hi * fall if prev["f0"] > 0 or rng.random() < 0.5 else 0.0
             c = pick(corpus, rng, {prev["file"]}, used, f0_t, prev["bright"], prev["dur"], prev["voiced"])
             used.add(id(c))
-            seg = faded(audio[c["file"]][c["start"]:c["end"]], sr)
+            seg = audio[c["file"]][c["start"]:c["end"]]
+            reversed_ = rng.random() < REVERSE_B
+            seg = faded(seg[::-1] if reversed_ else seg, sr)
             gain = target_level / max(c["rms"], 1e-5) * (0.85 + 0.3 * rng.random())
             out.append(seg * min(gain, 8.0))
             gap = rng.choice(gaps) if gaps else 0.05
             out.append(np.zeros(int(gap * sr)))
             total += c["dur"] + gap
-            log.append(f'{c["file"]}#{c["idx"]}')
+            log.append(f'{c["file"]}#{c["idx"]}' + ("R" if reversed_ else ""))
             prev = c
         pause = rng.uniform(0.45, 1.2)                          # between phrases
         out.append(np.zeros(int(pause * sr)))
@@ -270,6 +274,8 @@ def render_transplant(corpus, audio, sr, source_file, rng):
         used.add(id(c))
         prev_file = c["file"]
         seg = audio[c["file"]][c["start"]:c["end"]]
+        if rng.random() < REVERSE_C:
+            seg = seg[::-1]
         max_len = int((slot_end - s["start"]) * 1.25) if i + 1 < len(src) else len(seg)
         seg = faded(seg[:max(max_len, int(0.05 * sr))], sr)
         gain = min(s["rms"] / max(c["rms"], 1e-5), 8.0)
@@ -325,7 +331,8 @@ def main():
     for i in range(3):
         y, log = render_collective(corpus, audio, sr, 20.0, rng)
         save(os.path.join(args.out, f"B_collective_{i + 1}.wav"), y, sr)
-        print(f"B{i + 1}: {len(log)} syllables from {len(set(l.split('#')[0] for l in log))} people")
+        print(f"B{i + 1}: {len(log)} syllables from {len(set(l.split('#')[0] for l in log))} recordings, "
+              f"{sum(l.endswith('R') for l in log)} reversed")
 
     for name in richest[:4]:
         original, y, log = render_transplant(corpus, audio, sr, name, rng)
