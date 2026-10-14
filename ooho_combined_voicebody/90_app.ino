@@ -39,9 +39,9 @@ void updateIdlePlayback() {
     // New grains only start while idle (a grain start does a bulk SD read).
     if (state == IDLE && grainCount > 0 && !stream.playing && static_cast<int32_t>(now - stream.nextEventMs) >= 0) {
       GrainInfo grain;
-      if (selectRandomGrain(grain)) {
-        startLogosGrain(i, grain, 0, true, LOGOS_LAUNCH_AUTO);
-      } else {
+      // On failure wait for the next scheduled slot instead of retrying the
+      // SD card on every loop() pass.
+      if (!selectRandomGrain(grain) || !startLogosGrain(i, grain, 0, true, LOGOS_LAUNCH_AUTO)) {
         scheduleLogosStream(stream, i);
       }
     }

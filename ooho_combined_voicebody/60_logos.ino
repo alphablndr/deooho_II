@@ -749,8 +749,16 @@ bool startLogosGrain(uint8_t index, const GrainInfo &grain, uint32_t extraOffset
   if (!file) {
     Serial.print("Could not open LOGOS source ");
     Serial.println(grain.filename);
+    // A pulled or dead card shows up here first: count it as SD trouble so the
+    // cube reboots and then waits silently for the card (2026-10-14 bench test).
+    // A single missing WAV on a healthy card (GRAINS.CSV still readable) is not.
+    if (!SD.exists(GRAINS_FILE) && ++grainReadFailures >= GRAIN_READ_FAILURES_PER_SD_FAILURE) {
+      grainReadFailures = 0;
+      noteSdFailure("LOGOS cannot read the card");
+    }
     return false;
   }
+  grainReadFailures = 0;
 
   const uint32_t availableStartMs = grain.startMs + extraOffsetMs;
   const uint32_t availableDurationMs = grain.durationMs - extraOffsetMs;
@@ -1026,15 +1034,17 @@ void finishLogosGrain(uint8_t index) {
     const uint32_t tailMs = randomRangeMs(LOGOS_REVERSE_TAIL_MIN_MS, min(LOGOS_REVERSE_TAIL_MAX_MS, stream.currentGrain.durationMs));
     if (stream.currentGrain.durationMs > tailMs + LOGOS_MIN_DURATION_MS) {
       const uint32_t offset = stream.currentGrain.durationMs - tailMs;
-      startLogosGrain(index, stream.currentGrain, offset, false, LOGOS_LAUNCH_REVERSE_TAIL);
-      return;
+      if (startLogosGrain(index, stream.currentGrain, offset, false, LOGOS_LAUNCH_REVERSE_TAIL)) {
+        return;
+      }
     }
   }
   if (state == IDLE && stream.repeatEligible && (nextRandomU32() % 100UL) < LOGOS_REPEAT_CHANCE_PERCENT) {
     const uint32_t offset = randomRangeMs(LOGOS_REPEAT_MIN_OFFSET_MS, LOGOS_REPEAT_MAX_OFFSET_MS);
     if (stream.currentGrain.durationMs > offset + LOGOS_MIN_DURATION_MS) {
-      startLogosGrain(index, stream.currentGrain, offset, false, LOGOS_LAUNCH_AUTO);
-      return;
+      if (startLogosGrain(index, stream.currentGrain, offset, false, LOGOS_LAUNCH_AUTO)) {
+        return;
+      }
     }
   }
 
