@@ -38,6 +38,8 @@ DIP_RATIO = 0.70          # the valley between two nuclei must dip below 70 % of
 FADE_S = 0.010
 REVERSE_B = 0.20          # share of syllables played backwards in B
 REVERSE_C = 0.10          # ...and in C (lower: keeps the phrase's melody readable)
+AIR_MAX_S = 0.12          # 'own air': quiet edge of its own take kept around a syllable
+AIR_QUIET = 1.6           # ...only while the take stays below this x its background
 F0_RANGE = (70.0, 400.0)
 
 
@@ -190,7 +192,7 @@ def background(x, sr):
     n = max(0, (len(x) - win) // hop + 1)
     env = np.array([rms(x[i * hop:i * hop + win]) for i in range(n)])
     if n == 0:
-        return 1e-4, []
+        return 1e-4, [], env
     floor = float(np.percentile(env, 10)) + 1e-7
     quiet, start = [], None
     for i, v in enumerate(np.append(env, np.inf)):
@@ -200,7 +202,7 @@ def background(x, sr):
             if (i - start) * HOP_S >= 0.12:
                 quiet.append((start * hop, (i - 1) * hop + win))
             start = None
-    return floor, quiet
+    return floor, quiet, env
 
 
 def build_corpus(paths, teensy_clean=False):
@@ -212,8 +214,8 @@ def build_corpus(paths, teensy_clean=False):
         sr_all = sr_all or sr
         name = os.path.basename(path)
         audio[name] = x
-        floor, quiet = background(x, sr)
-        files[name] = dict(floor=floor, quiet=quiet)
+        floor, quiet, env = background(x, sr)
+        files[name] = dict(floor=floor, quiet=quiet, env=env)
         prev_end = None
         for idx, (s, e) in enumerate(find_syllables(x, sr)):
             seg = x[s:e]
@@ -260,46 +262,54 @@ def pick(corpus, rng, exclude_files, used, f0_t, br_t, dur_t, v_t, k=6, snr_t=No
     return top[rng.choice(len(top), p=w / w.sum())]
 
 
-def room_tone(files, audio, names, length, sr, rng, level):
-    """A continuous bed made of the archive's own quiet stretches (original
-    material), crossfaded end to end and set to `level`. It fills the digital
-    silence between syllables and masks the background changing at seams."""
-    snippets = []
-    for name in names:
-        for a, b in files[name]["quiet"]:
-            seg = audio[name][a:b]
-            if rms(seg) > 0:
-                snippets.append(seg / rms(seg))
-    bed = np.zeros(length)
-    if not snippets or level <= 0:
-        return bed
-    xf = int(0.06 * sr)
-    pos = 0
-    while pos < length:
-        seg = snippets[rng.integers(len(snippets))]
-        if len(seg) <= 2 * xf:
+def air_pads(files, name, s, e, sr, n_audio):
+    """How much quiet edge of its own take a syllable may carry (samples)."""
+    info = files[name]
+    env, floor, hop = info["env"], info["floor"], int(HOP_S * sr)
+    limit = int(AIR_MAX_S / HOP_S)
+    k, pre = s // hop, 0
+    while pre < limit and k - pre - 1 >= 0 and env[k - pre - 1] < floor * AIR_QUIET:
+        pre += 1
+    k, post = e // hop, 0
+    while post < limit and k + post + 1 < len(env) and env[k + post + 1] < floor * AIR_QUIET:
+        post += 1
+    return min(pre * hop, s), min(post * hop, n_audio - e)
+
+
+def shaped(seg, lead, tail, sr):
+    """Equal-power fades over the air on each side (at least FADE_S)."""
+    seg = seg.copy()
+    for n, at_start in ((max(lead, int(FADE_S * sr)), True), (max(tail, int(FADE_S * sr)), False)):
+        n = min(n, len(seg) // 2)
+        if n <= 0:
             continue
-        ramp = np.sqrt(0.5 - 0.5 * np.cos(np.linspace(0, np.pi, xf)))  # equal-power crossfade
-        seg = seg.copy()
-        seg[:xf] *= ramp
-        seg[-xf:] *= ramp[::-1]
-        end = min(pos + len(seg), length)
-        bed[pos:end] += seg[:end - pos]
-        pos += len(seg) - xf
-    return bed * level
+        ramp = np.sin(np.linspace(0, np.pi / 2, n))
+        if at_start:
+            seg[:n] *= ramp
+        else:
+            seg[-n:] *= ramp[::-1]
+    return seg
 
 
-def render_collective(corpus, audio, sr, seconds, rng, seam=False):
+def mix(pieces, length=None):
+    end = max(st + len(sg) for st, sg in pieces)
+    out = np.zeros(max(end, length or 0))
+    for st, sg in pieces:
+        out[st:st + len(sg)] += sg
+    return out
+
+
+def render_collective(corpus, audio, sr, seconds, rng, seam=False, files=None, air=False):
     """B: one impossible speaker. Phrases with a falling melody, each syllable
     from a different person than the one before, continuing pitch and timbre."""
     gaps = [c["gap_before"] for c in corpus if c["gap_before"] is not None and 0 <= c["gap_before"] < 0.35]
     voiced_f0 = [c["f0"] for c in corpus if c["f0"] > 0]
     target_level = float(np.median([c["rms"] for c in corpus]))
     snr_median = float(np.median([c["snr"] for c in corpus]))
-    out, used, log, chosen = [], set(), [], []
-    total = 0.0
+    pieces, used, log, chosen = [], set(), [], []
+    t = int(AIR_MAX_S * sr)                                     # timeline position of the next core
     prev = rng.choice(corpus)
-    while total < seconds:
+    while t < seconds * sr:
         n_syll = int(rng.integers(4, 11))                       # one phrase
         f0_hi = float(np.percentile(voiced_f0, 70)) if voiced_f0 else 0.0
         for k in range(n_syll):
@@ -309,31 +319,29 @@ def render_collective(corpus, audio, sr, seconds, rng, seam=False):
                      snr_t=prev["snr"] if seam else None, snr_median=snr_median)
             used.add(id(c))
             chosen.append(c)
-            seg = audio[c["file"]][c["start"]:c["end"]]
+            x = audio[c["file"]]
+            pre, post = air_pads(files, c["file"], c["start"], c["end"], sr, len(x)) if air else (0, 0)
+            seg = x[c["start"] - pre:c["end"] + post]
             reversed_ = rng.random() < REVERSE_B
-            seg = faded(seg[::-1] if reversed_ else seg, sr)
+            if reversed_:
+                seg, pre, post = seg[::-1], post, pre
             gain = target_level / max(c["rms"], 1e-5) * (0.85 + 0.3 * rng.random())
-            out.append(seg * min(gain, 8.0))
+            pieces.append((t - pre, shaped(seg, pre, post, sr) * min(gain, 8.0)))
             gap = rng.choice(gaps) if gaps else 0.05
-            out.append(np.zeros(int(gap * sr)))
-            total += c["dur"] + gap
+            t += (c["end"] - c["start"]) + int(gap * sr)
             log.append(f'{c["file"]}#{c["idx"]}' + ("R" if reversed_ else ""))
             prev = c
-        pause = rng.uniform(0.45, 1.2)                          # between phrases
-        out.append(np.zeros(int(pause * sr)))
-        total += pause
-    # background of a level-matched syllable = target / snr: lay the bed there
-    bed_level = target_level * float(np.median([1.0 / c["snr"] for c in chosen]))
-    return np.concatenate(out), log, bed_level
+        t += int(rng.uniform(0.45, 1.2) * sr)                    # pause between phrases
+    return mix(pieces, t), log
 
 
-def render_transplant(corpus, audio, sr, source_file, rng, seam=False):
+def render_transplant(corpus, audio, sr, source_file, rng, seam=False, files=None, air=False):
     """C: keep the rhythm and melody of one phrase, replace every syllable with
     the closest-sounding syllable of someone else (no pitch shifting: chosen)."""
     src = [c for c in corpus if c["file"] == source_file]
     x_src = audio[source_file]
     length = src[-1]["end"] + int(0.3 * sr)
-    out = np.zeros(length)
+    pieces = [(0, np.zeros(length))]
     snr_median = float(np.median([c["snr"] for c in corpus]))
     used, log, prev_file = set(), [], None
     for i, s in enumerate(src):
@@ -343,16 +351,19 @@ def render_transplant(corpus, audio, sr, source_file, rng, seam=False):
                  snr_t=max(s["snr"], snr_median) if seam else None, snr_median=snr_median)
         used.add(id(c))
         prev_file = c["file"]
-        seg = audio[c["file"]][c["start"]:c["end"]]
+        x = audio[c["file"]]
+        max_core = int((slot_end - s["start"]) * 1.25) if i + 1 < len(src) else c["end"] - c["start"]
+        core_end = c["start"] + max(min(max_core, c["end"] - c["start"]), int(0.05 * sr))
+        pre, post = air_pads(files, c["file"], c["start"], c["end"], sr, len(x)) if air else (0, 0)
+        if core_end < c["end"]:
+            post = 0                                           # cut short: no tail air
+        seg = x[c["start"] - pre:core_end + post]
         if rng.random() < REVERSE_C:
-            seg = seg[::-1]
-        max_len = int((slot_end - s["start"]) * 1.25) if i + 1 < len(src) else len(seg)
-        seg = faded(seg[:max(max_len, int(0.05 * sr))], sr)
+            seg, pre, post = seg[::-1], post, pre
         gain = min(s["rms"] / max(c["rms"], 1e-5), 8.0)
-        a = s["start"]
-        b = min(a + len(seg), length)
-        out[a:b] += seg[:b - a] * gain
+        pieces.append((max(0, s["start"] - pre), shaped(seg, pre, post, sr) * gain))
         log.append(f'{s["f0"]:.0f}Hz->{c["file"]}#{c["idx"]}({c["f0"]:.0f}Hz)')
+    out = mix(pieces, length)[:length]
     original = x_src[:length]
     return original, out, log
 
@@ -398,29 +409,22 @@ def main():
     for name in richest[:3]:
         save(os.path.join(args.out, f"A_syllables_{name[:-4]}.wav"), render_syllable_check(corpus, audio, sr, name), sr)
 
-    all_names = sorted(files)
     for i in range(3):
-        y, log, bed_level = render_collective(corpus, audio, sr, 20.0, np.random.default_rng(args.seed + i))
-        bed = room_tone(files, audio, all_names, len(y), sr, np.random.default_rng(100 + i), bed_level)
-        ys, logs, bed_level_s = render_collective(corpus, audio, sr, 20.0, np.random.default_rng(args.seed + i), seam=True)
-        beds = room_tone(files, audio, all_names, len(ys), sr, np.random.default_rng(200 + i), bed_level_s)
-        save(os.path.join(args.out, f"B{i + 1}_1_plain.wav"), y, sr)
-        save(os.path.join(args.out, f"B{i + 1}_2_roomtone.wav"), y + bed, sr)
-        save(os.path.join(args.out, f"B{i + 1}_3_seams_roomtone.wav"), ys + beds, sr)
+        seed = args.seed + i
+        y3, log = render_collective(corpus, audio, sr, 20.0, np.random.default_rng(seed), seam=True, files=files)
+        y4, _ = render_collective(corpus, audio, sr, 20.0, np.random.default_rng(seed), seam=True, files=files, air=True)
+        save(os.path.join(args.out, f"B{i + 1}_3_seams.wav"), y3, sr)
+        save(os.path.join(args.out, f"B{i + 1}_4_seams_air.wav"), y4, sr)
         print(f"B{i + 1}: {len(log)} syllables from {len(set(l.split('#')[0] for l in log))} recordings, "
-              f"{sum(l.endswith('R') for l in log)} reversed; bed {20 * np.log10(bed_level):.1f} dBFS "
-              f"(seam-aware {20 * np.log10(bed_level_s):.1f})")
+              f"{sum(l.endswith('R') for l in log)} reversed")
 
     for name in richest[:4]:
-        original, y, _ = render_transplant(corpus, audio, sr, name, np.random.default_rng(args.seed))
-        _, ys, _ = render_transplant(corpus, audio, sr, name, np.random.default_rng(args.seed), seam=True)
-        floor = files[name]["floor"]
+        original, y3, _ = render_transplant(corpus, audio, sr, name, np.random.default_rng(args.seed), seam=True, files=files)
+        _, y4, _ = render_transplant(corpus, audio, sr, name, np.random.default_rng(args.seed), seam=True, files=files, air=True)
         gap = np.zeros(int(0.8 * sr))
-        bed = room_tone(files, audio, [name], len(y), sr, np.random.default_rng(300), floor)
-        save(os.path.join(args.out, f"C_{name[:-4]}_1_plain.wav"), np.concatenate([original, gap, y]), sr)
-        save(os.path.join(args.out, f"C_{name[:-4]}_2_roomtone.wav"), np.concatenate([original, gap, y + bed]), sr)
-        save(os.path.join(args.out, f"C_{name[:-4]}_3_seams_roomtone.wav"), np.concatenate([original, gap, ys + bed]), sr)
-        print(f"C {name}: original, then transplant (room tone = this person's own pauses at {20 * np.log10(floor):.1f} dBFS)")
+        save(os.path.join(args.out, f"C_{name[:-4]}_3_seams.wav"), np.concatenate([original, gap, y3]), sr)
+        save(os.path.join(args.out, f"C_{name[:-4]}_4_seams_air.wav"), np.concatenate([original, gap, y4]), sr)
+        print(f"C {name}: original, then transplant")
 
 
 if __name__ == "__main__":
