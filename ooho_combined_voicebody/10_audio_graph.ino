@@ -140,6 +140,8 @@ char tempFilename[13] = "T0000.WAV";
 DMAMEM uint8_t internalRecordBuffer[INTERNAL_RECORD_BYTES];
 EXTMEM uint8_t psramRecordBuffer[FIELD_RECORD_BYTES];
 EXTMEM int16_t logosGrainBuffers[LOGOS_STREAM_COUNT][LOGOS_MAX_GRAIN_SAMPLES];
+EXTMEM float humBlockEnergy[MAX_TAKE_BLOCKS];   // per-block loudness for hum removal
+EXTMEM float humEnergySorted[MAX_TAKE_BLOCKS];  // scratch copy for the median
 uint8_t *activeRecordBuffer = internalRecordBuffer;
 size_t activeRecordCapacity = INTERNAL_RECORD_BYTES;
 uint32_t activeRecordSeconds = INTERNAL_RECORD_SECONDS;

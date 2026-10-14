@@ -27,6 +27,7 @@ constexpr float OUTPUT_RETURN_SECONDS = 1.5f;   // and comes back after release
 // pulses leak into the mic input as the 344.5 Hz hum (measured 2026-10-14:
 // -38 dBFS with synthesis, -47 dBFS without). The cube is silent while it
 // records, so synthesis pauses once the duck has faded out.
+constexpr uint32_t MAX_TAKE_BLOCKS = FIELD_RECORD_BYTES / 2 / AUDIO_BLOCK_SAMPLES + 1;
 constexpr uint32_t SYNTH_PAUSE_AFTER_MS = static_cast<uint32_t>(OUTPUT_DUCK_SECONDS * 1000.0f) + 20;
 
 constexpr uint32_t MODEL_MAGIC = 0x4F4F484FUL;  // "OOHO"

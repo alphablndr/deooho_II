@@ -185,29 +185,59 @@ void startRecording() {
 // averaging all blocks gives its waveform (speech averages out) and we subtract
 // it. This also removes DC. Takes start on a block boundary, so sample i sits
 // at block position i % AUDIO_BLOCK_SAMPLES.
+// Only the quieter half of the blocks builds the template: in a short loud
+// take the voice does not average out and would be subtracted back as a buzz
+// (W0013, 2026-10-14: -39 dBFS left in the pauses; quiet half: -70 dBFS).
 // firstSample must sit on a block boundary.
 void removeHumInRange(uint32_t firstSample, uint32_t endSample) {
   int16_t *samples = reinterpret_cast<int16_t *>(activeRecordBuffer);
-  const uint32_t blocks = (endSample - firstSample) / AUDIO_BLOCK_SAMPLES;
+  uint32_t blocks = (endSample - firstSample) / AUDIO_BLOCK_SAMPLES;
+  if (blocks > MAX_TAKE_BLOCKS) {
+    blocks = MAX_TAKE_BLOCKS;
+  }
   if (blocks < 8) {
     return;
   }
 
-  int32_t sum[AUDIO_BLOCK_SAMPLES] = {0};  // 30 s max: 10336 blocks * 32767 fits int32
   for (uint32_t b = 0; b < blocks; ++b) {
+    const int16_t *block = samples + firstSample + b * AUDIO_BLOCK_SAMPLES;
+    float energy = 0.0f;
+    for (uint16_t j = 0; j < AUDIO_BLOCK_SAMPLES; ++j) {
+      energy += static_cast<float>(block[j]) * block[j];
+    }
+    humBlockEnergy[b] = energy;
+    humEnergySorted[b] = energy;
+    if ((b & 0xFFUL) == 0) {
+      workTick();
+    }
+  }
+  float *median = humEnergySorted + blocks / 2;
+  std::nth_element(humEnergySorted, median, humEnergySorted + blocks);
+  const float quietLimit = *median;
+
+  int32_t sum[AUDIO_BLOCK_SAMPLES] = {0};  // 30 s max: 10336 blocks * 32767 fits int32
+  int32_t used = 0;
+  for (uint32_t b = 0; b < blocks; ++b) {
+    if (humBlockEnergy[b] > quietLimit) {
+      continue;
+    }
     const int16_t *block = samples + firstSample + b * AUDIO_BLOCK_SAMPLES;
     for (uint16_t j = 0; j < AUDIO_BLOCK_SAMPLES; ++j) {
       sum[j] += block[j];
     }
+    ++used;
     if ((b & 0xFFUL) == 0) {
       workTick();
     }
+  }
+  if (used == 0) {
+    return;
   }
 
   int16_t hum[AUDIO_BLOCK_SAMPLES];
   double humEnergy = 0.0;
   for (uint16_t j = 0; j < AUDIO_BLOCK_SAMPLES; ++j) {
-    hum[j] = static_cast<int16_t>(sum[j] / static_cast<int32_t>(blocks));
+    hum[j] = static_cast<int16_t>(sum[j] / used);
     humEnergy += static_cast<double>(hum[j]) * hum[j];
   }
 
