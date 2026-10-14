@@ -133,6 +133,8 @@ uint8_t recentGrainWrite = 0;
 uint8_t recentGrainUsed = 0;
 uint8_t logosDensityMode = LOGOS_MODE_PRESENT;
 uint32_t logosDensitySwitchMs = 0;
+float logosActivity = LOGOS_SLEEP_LEVEL;  // how awake the crowd is (0..1)
+uint32_t logosActivityUpdatedMs = 0;
 float logosDensityGainCur = 1.0f;  // smoothed bus gain, eased toward the mode target
 
 char currentFilename[13] = "W0000.WAV";
@@ -181,6 +183,7 @@ float melosLogosDensity = 0.0f;
 float melosLogosEnvelope = 0.0f;
 float melosLearnAmount = 0.0f;
 float melosLearnF0 = DEFAULT_F0_HZ;
+uint32_t melosLearnStartMs = 0;
 float melosLearnBreath = 0.0f;
 uint8_t melosLearnBand = 2;
 uint32_t melosSampleCounter = 0;

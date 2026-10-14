@@ -42,6 +42,7 @@ uint8_t dominantBandIndex(const float bands[]) {
 // Post-recording "chew": briefly foreground the new voice, then dissolve.
 void triggerMelosLearnedGesture(float incomingF0, float incomingVoicedRatio, const float incomingBands[]) {
   melosLearnAmount = 1.0f;
+  melosLearnStartMs = millis();
   melosLearnF0 = incomingF0 > 0.0f && isfinite(incomingF0) ? constrain(incomingF0, F0_MIN_HZ, F0_MAX_HZ) : constrain(expf(model.meanLogF0), F0_MIN_HZ, F0_MAX_HZ);
   melosLearnBreath = constrain(1.0f - incomingVoicedRatio, 0.0f, 1.0f);
   melosLearnBand = dominantBandIndex(incomingBands);
@@ -277,10 +278,20 @@ void melosBlockUpdate() {
 
   // Pitch center, biased toward the just-recorded voice during the chew gesture.
   const float collectiveF0 = constrain(expf(model.meanLogF0), F0_MIN_HZ, F0_MAX_HZ);
-  const float targetF0 = collectiveF0 * (1.0f - melosLearnAmount * 0.42f) + melosLearnF0 * (melosLearnAmount * 0.42f);
-  melosF0 += (targetF0 - melosF0) * (MELOS_F0_EASE * blk);
+  // Follow the last voice: full pull while holding, then a smooth (cosine)
+  // return to the archive average. Mixed in log-pitch, so it moves in tones.
+  const uint32_t sinceLearn = millis() - melosLearnStartMs;
+  const bool learnHolding = melosLearnAmount > 0.0f && sinceLearn < MELOS_LEARN_HOLD_MS;
+  if (melosLearnAmount > 0.0f && !learnHolding) {
+    const uint32_t intoReturn = sinceLearn - MELOS_LEARN_HOLD_MS;
+    melosLearnAmount = intoReturn >= MELOS_LEARN_RETURN_MS
+                           ? 0.0f
+                           : 0.5f * (1.0f + cosf(PI * static_cast<float>(intoReturn) / MELOS_LEARN_RETURN_MS));
+  }
+  const float pull = melosLearnAmount * MELOS_LEARN_PULL;
+  const float targetF0 = expf(logf(collectiveF0) * (1.0f - pull) + logf(melosLearnF0) * pull);
+  melosF0 += (targetF0 - melosF0) * ((learnHolding ? MELOS_LEARN_GLIDE_EASE : MELOS_F0_EASE) * blk);
   melosVoicedRatio += (model.voicedRatio - melosVoicedRatio) * (MELOS_PARAM_EASE * blk);
-  melosLearnAmount += (0.0f - melosLearnAmount) * (MELOS_LEARN_DECAY * blk);
 
   // Archive pitch spread -> swarm width (semitones).
   float variance = model.meanLogF0Sq - model.meanLogF0 * model.meanLogF0;

@@ -106,7 +106,12 @@ constexpr float MELOS_LOGOS_CONSTRICT_DECAY = 1.0f / (1.1f * SAMPLE_RATE);
 constexpr float MELOS_LOGOS_STABILIZE_DECAY = 1.0f / (3.2f * SAMPLE_RATE);
 constexpr float MELOS_LOGOS_DENSITY_EASE = 1.0f / (1.5f * SAMPLE_RATE);
 constexpr float MELOS_LOGOS_COUPLING = 1.25f;
-constexpr float MELOS_LEARN_DECAY = 1.0f / (18.0f * SAMPLE_RATE);
+// MELOS follows the last voice: glide most of the way to its pitch, hold
+// ("the cube repeats you"), then drift back to the archive average.
+constexpr float MELOS_LEARN_PULL = 0.85f;
+constexpr uint32_t MELOS_LEARN_HOLD_MS = 7000;
+constexpr uint32_t MELOS_LEARN_RETURN_MS = 40000;
+constexpr float MELOS_LEARN_GLIDE_EASE = 1.0f / (1.0f * SAMPLE_RATE);  // ~1 s pitch glide
 constexpr float MELOS_TONGUE_EASE = 1.0f / (2.6f * SAMPLE_RATE);
 constexpr float MELOS_TONGUE_DIAMETER_EASE = 1.0f / (1.8f * SAMPLE_RATE);
 constexpr float MELOS_ARTICULATION_DECAY = 1.0f / (1.7f * SAMPLE_RATE);
@@ -199,10 +204,17 @@ constexpr uint8_t LOGOS_MODE_PRESENT = 1;
 constexpr uint8_t LOGOS_MODE_SWARM = 2;
 constexpr uint32_t LOGOS_DENSITY_MIN_MS = 18000;
 constexpr uint32_t LOGOS_DENSITY_MAX_MS = 56000;
-constexpr uint32_t LOGOS_ARCHIVE_FULL_GRAINS = 240;
+// "Alive" density (Anton 2026-10-14): a saved take wakes the cube, without
+// people it slowly falls asleep, and how dense it wakes depends on how many
+// voices the archive holds. Pressure = fill (archive size) x activity.
+constexpr uint32_t LOGOS_FULL_RECORDINGS = 150;      // fill reaches 1 (~middle of day 2 at 300-400 takes)
+constexpr float LOGOS_WAKE_PER_TAKE = 0.5f;          // activity added by each saved take
+constexpr float LOGOS_SLEEP_LEVEL = 0.1f;            // activity with nobody around
+constexpr float LOGOS_SLEEP_HALF_LIFE_S = 480.0f;    // 8 min to fall halfway asleep
+constexpr float FIRST_WAKE_SECONDS = 4.0f;           // empty archive is silent; the first take fades the cube in
 constexpr uint8_t LOGOS_ARCHIVE_INTERVAL_REDUCTION = 38;
 constexpr uint8_t LOGOS_ARCHIVE_SWARM_INTERVAL_REDUCTION = 52;
-constexpr uint8_t LOGOS_ARCHIVE_DORMANT_REDUCTION = 62;
+constexpr uint32_t LOGOS_DORMANT_MAX_SHRINK_MS = 11904;  // dormant-stream gaps shrink this much at full pressure
 constexpr uint8_t LOGOS_ARCHIVE_VOICE_BOOST_MAX = 3;
 // Chance that the next grain comes from the newest recordings, by density
 // mode (Anton 2026-10-13: a small preference; was 24 / 42 / 62).
@@ -394,6 +406,11 @@ void loadModel();
 bool saveModel();
 
 uint32_t musicalLogosIntervalMs(uint8_t index);
+uint32_t archiveRecordings();
+bool archiveEmpty();
+float logosFill();
+void updateLogosActivity();
+void wakeLogos();
 uint8_t logosArchivePressure();
 const char *logosDensityModeName();
 void chooseLogosDensityMode();

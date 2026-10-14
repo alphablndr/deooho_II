@@ -15,14 +15,44 @@ uint32_t musicalLogosIntervalMs(uint8_t index) {
   return static_cast<uint32_t>(interval);
 }
 
+// Saved recordings, by the counter (a deleted take still counts).
+uint32_t archiveRecordings() {
+  return nextIndex > 1 ? nextIndex - 1 : 0;
+}
+
+bool archiveEmpty() {
+  return nextIndex <= 1;
+}
+
+// 0..1: how many voices the archive holds; sqrt so the first takes count most
+// (10 takes: 0.26, 50: 0.58, 100: 0.82, 150+: 1).
+float logosFill() {
+  const float fill = sqrtf(static_cast<float>(archiveRecordings()) / LOGOS_FULL_RECORDINGS);
+  return fill > 1.0f ? 1.0f : fill;
+}
+
+// Without people the crowd eases back toward sleep (half-life).
+void updateLogosActivity() {
+  const uint32_t now = millis();
+  if (now - logosActivityUpdatedMs < 100) {
+    return;
+  }
+  const float dt = static_cast<float>(now - logosActivityUpdatedMs) / 1000.0f;
+  logosActivityUpdatedMs = now;
+  logosActivity = LOGOS_SLEEP_LEVEL + (logosActivity - LOGOS_SLEEP_LEVEL) * exp2f(-dt / LOGOS_SLEEP_HALF_LIFE_S);
+}
+
+// A saved take wakes the crowd at once: a new density mode is chosen and all
+// streams are rescheduled on the next updateIdlePlayback().
+void wakeLogos() {
+  logosActivity = min(1.0f, logosActivity + LOGOS_WAKE_PER_TAKE);
+  logosDensitySwitchMs = 0;
+}
+
+// 0..100. Every LOGOS density decision reads this: gaps, voices per cloud,
+// density mode, dormant streams.
 uint8_t logosArchivePressure() {
-  if (grainCount == 0) {
-    return 0;
-  }
-  if (grainCount >= LOGOS_ARCHIVE_FULL_GRAINS) {
-    return 100;
-  }
-  return static_cast<uint8_t>((grainCount * 100UL) / LOGOS_ARCHIVE_FULL_GRAINS);
+  return static_cast<uint8_t>(100.0f * logosFill() * logosActivity + 0.5f);
 }
 
 uint32_t archiveScaledInterval(uint32_t minMs, uint32_t maxMs, uint8_t maxReductionPercent) {
@@ -51,8 +81,9 @@ const char *logosDensityModeName() {
 
 void chooseLogosDensityMode() {
   const uint8_t pressure = logosArchivePressure();
-  const uint8_t sparseChance = 26 > (pressure * 18UL) / 100UL ? 26 - (pressure * 18UL) / 100UL : 8;
-  const uint8_t swarmChance = 28 + (pressure * 34UL) / 100UL;
+  // Asleep: mostly sparse. Fully awake with a full archive: mostly present/swarm.
+  const uint8_t sparseChance = static_cast<uint8_t>(70UL - (pressure * 60UL) / 100UL);
+  const uint8_t swarmChance = static_cast<uint8_t>(5UL + (pressure * 45UL) / 100UL);
   const uint8_t presentEnd = 100 - swarmChance;
   const uint8_t r = nextRandomU32() % 100UL;
   if (r < sparseChance) {
@@ -65,9 +96,13 @@ void chooseLogosDensityMode() {
   logosDensitySwitchMs = millis() + randomRangeMs(LOGOS_DENSITY_MIN_MS, LOGOS_DENSITY_MAX_MS);
   Serial.print("LOGOS density mode: ");
   Serial.print(logosDensityModeName());
-  Serial.print(" archivePressure=");
+  Serial.print(" pressure=");
   Serial.print(pressure);
-  Serial.println("%");
+  Serial.print("% (fill ");
+  Serial.print(logosFill(), 2);
+  Serial.print(" x activity ");
+  Serial.print(logosActivity, 2);
+  Serial.println(")");
 }
 
 float musicalLogosRate(uint8_t index) {
@@ -209,8 +244,7 @@ void scheduleLogosStream(LogosStream &stream, uint8_t index) {
                                                             LOGOS_ARCHIVE_INTERVAL_REDUCTION);
     }
   } else {
-    const uint32_t density = grainCount < LOGOS_ARCHIVE_FULL_GRAINS ? grainCount : LOGOS_ARCHIVE_FULL_GRAINS;
-    const uint32_t shrink = (density * LOGOS_ARCHIVE_DORMANT_REDUCTION * 80UL) / 100UL;
+    const uint32_t shrink = (static_cast<uint32_t>(logosArchivePressure()) * LOGOS_DORMANT_MAX_SHRINK_MS) / 100UL;
     uint32_t minDormant = LOGOS_DORMANT_MIN_INTERVAL_MS > shrink ? LOGOS_DORMANT_MIN_INTERVAL_MS - shrink : 7000UL;
     uint32_t maxDormant = LOGOS_DORMANT_MAX_INTERVAL_MS > shrink ? LOGOS_DORMANT_MAX_INTERVAL_MS - shrink : 18000UL;
     if (logosDensityMode == LOGOS_MODE_SPARSE) {

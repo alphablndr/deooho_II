@@ -366,7 +366,10 @@ bool processRecording() {
 void stopRecording() {
   recordQueue.end();
   drainRecordQueue();
-  setOutputLevel(1.0f, OUTPUT_RETURN_SECONDS);
+  const bool firstTake = archiveEmpty();
+  if (!firstTake) {
+    setOutputLevel(1.0f, OUTPUT_RETURN_SECONDS);
+  }
 
   // The release click is recorded before the debounce confirms the release.
   const size_t endTrimBytes = RECORD_TRIM_END_MS * (SAMPLE_RATE / 1000UL) * 2UL;
@@ -393,8 +396,14 @@ void stopRecording() {
       SD.remove(tempFilename);
     }
     noteSdFailure("take not saved");
-  } else if (sdFailureStreak == failuresBefore) {
-    sdFailureStreak = 0;  // a clean take: the card is fine
+  } else {
+    if (sdFailureStreak == failuresBefore) {
+      sdFailureStreak = 0;  // a clean take: the card is fine
+    }
+    wakeLogos();
+    if (firstTake && !archiveEmpty()) {
+      setOutputLevel(1.0f, FIRST_WAKE_SECONDS);  // the very first voice wakes the cube
+    }
   }
 
   enterState(IDLE);

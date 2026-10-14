@@ -148,7 +148,11 @@ void printDiagnostics() {
   Serial.print(grainCount);
   Serial.print(", archivePressure: ");
   Serial.print(logosArchivePressure());
-  Serial.print("%");
+  Serial.print("% (fill ");
+  Serial.print(logosFill(), 2);
+  Serial.print(" x activity ");
+  Serial.print(logosActivity, 2);
+  Serial.print(")");
   Serial.print(", nextWav: ");
   makeFilename(currentFilename, nextIndex);
   Serial.println(currentFilename);
@@ -178,6 +182,11 @@ void printDiagnostics() {
   Serial.print(model.voicedRatio, 3);
   Serial.print(" / ");
   Serial.println(model.meanRms, 5);
+  Serial.print("  melos pitch now / last voice: ");
+  Serial.print(melosF0, 1);
+  Serial.print(" / ");
+  Serial.print(melosLearnF0, 1);
+  Serial.println(" Hz");
   Serial.print("  melos learn/logosEnv/density: ");
   Serial.print(melosLearnAmount, 3);
   Serial.print(" / ");
@@ -237,12 +246,16 @@ void toggleDiagnosticTone() {
     diagnosticTone.frequency(440.0f);
     diagnosticTone.amplitude(0.12f);
     diagnosticToneOn = true;
+    setOutputLevel(1.0f, 0.0f);  // audible even while an empty archive keeps the cube silent
     Serial.println("Diagnostic tone ON.");
   } else {
     diagnosticTone.amplitude(0.0f);
     diagnosticToneOn = false;
     initializeLogosSchedulers();
     melosQueuedFreshAudio = false;  // MELOS synth re-gates on next feed
+    if (archiveEmpty()) {
+      setOutputLevel(0.0f, 0.0f);
+    }
     Serial.println("Diagnostic tone OFF.");
   }
 }
@@ -259,6 +272,7 @@ void startMelosSweep() {
   diagnosticTone.frequency(60.0f);
   diagnosticTone.amplitude(0.25f);
   melosSweep = true;
+  setOutputLevel(1.0f, 0.0f);
   melosSweepStartMs = millis();
   melosSweepLastPrintMs = 0;
   Serial.println("Exciter sweep 60 Hz -> 8 kHz over 30 s (right channel). Note ringing/booming Hz.");
@@ -278,6 +292,9 @@ void updateMelosSweep() {
     rightMixer.gain(1, 0.8f);
     melosQueuedFreshAudio = false;
     initializeLogosSchedulers();
+    if (archiveEmpty()) {
+      setOutputLevel(0.0f, 0.0f);
+    }
     Serial.println("Sweep done.");
     return;
   }
@@ -465,6 +482,10 @@ void setup() {
   Serial.println("Serial: r=record toggle, s=stop, t=tone, m=model, g=grains, d=diagnostics, n=LOGOS now, e=(no render), x=rebuild grains, y=exciter sweep, w=watchdog test (hangs!).");
   Serial.println("MELOS is real-time synthesized; LOGOS is a 4-stream PSRAM crowd with reverse/rate.");
 
+  if (archiveEmpty()) {
+    setOutputLevel(0.0f, 0.0f);
+    Serial.println("Archive empty: the cube stays silent until the first recording.");
+  }
   enterState(IDLE);
   initializeLogosSchedulers();
   startWatchdog();
@@ -472,6 +493,7 @@ void setup() {
 
 void loop() {
   kickWatchdog();
+  updateLogosActivity();
   if (state == ERROR_STATE && millis() - lastSdRetryMs >= SD_RETRY_INTERVAL_MS) {
     lastSdRetryMs = millis();
     if (SD.begin(BUILTIN_SDCARD)) {
