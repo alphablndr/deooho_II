@@ -140,6 +140,12 @@ char tempFilename[13] = "T0000.WAV";
 DMAMEM uint8_t internalRecordBuffer[INTERNAL_RECORD_BYTES];
 EXTMEM uint8_t psramRecordBuffer[FIELD_RECORD_BYTES];
 EXTMEM int16_t logosGrainBuffers[LOGOS_STREAM_COUNT][LOGOS_MAX_GRAIN_SAMPLES];
+EXTMEM GrainEntry grainIndex[GRAIN_INDEX_CAPACITY];              // ~240 KB
+EXTMEM RecordingEntry recordingIndex[RECORDING_INDEX_CAPACITY];  // ~80 KB
+uint32_t grainIndexCount = 0;
+uint32_t recordingIndexCount = 0;
+uint8_t sdFailureStreak = 0;     // SD failures in a row (reset by a clean take)
+uint32_t lastSdRetryMs = 0;      // no card at boot: last SD.begin() attempt
 EXTMEM float humBlockEnergy[MAX_TAKE_BLOCKS];   // per-block loudness for hum removal
 EXTMEM float humEnergySorted[MAX_TAKE_BLOCKS];  // scratch copy for the median
 uint8_t *activeRecordBuffer = internalRecordBuffer;

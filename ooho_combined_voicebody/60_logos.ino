@@ -238,31 +238,14 @@ void initializeLogosSchedulers() {
   logosResponse.pending = false;
 }
 
-uint32_t countGrains() {
-  FsFile file = SD.sdfs.open(GRAINS_FILE, O_RDONLY);
-  if (!file) {
-    return 0;
-  }
-
-  uint32_t count = 0;
-  bool hasChars = false;
-  while (file.available()) {
-    const int c = file.read();
-    if (c == '\n') {
-      if (hasChars) {
-        count++;
-      }
-      hasChars = false;
-    } else if (c != '\r') {
-      hasChars = true;
-    }
-  }
-  if (hasChars) {
-    count++;
-  }
-  file.close();
-  return count;
-}
+// ---------------- Grain index (PSRAM) ----------------
+// GRAINS.CSV is read once at boot (and after 'x'); every choice afterwards is
+// made from memory. Scanning the CSV for each grain blocked loop() for ~2 ms
+// at only 16 lines (2026-10-14) and would grow with the archive (300-400
+// takes expected). Grains of one recording are contiguous in the CSV (written
+// per take), so each recording keeps its first grain and count: a random
+// recording is picked first, then a grain inside it, so every person sounds
+// about equally often (Anton 2026-10-13).
 
 bool readCsvLine(FsFile &file, char *line, size_t maxLen) {
   size_t used = 0;
@@ -301,6 +284,89 @@ bool parseGrainLine(const char *line, GrainInfo &grain) {
   return grain.durationMs > 0;
 }
 
+bool fileNumberFromName(const char *name, uint16_t &number) {
+  if (strlen(name) != 9 || name[0] != 'W' || strcasecmp(name + 5, ".WAV") != 0) {
+    return false;
+  }
+  uint16_t value = 0;
+  for (uint8_t i = 1; i < 5; ++i) {
+    if (name[i] < '0' || name[i] > '9') {
+      return false;
+    }
+    value = value * 10 + (name[i] - '0');
+  }
+  number = value;
+  return value > 0;
+}
+
+void clearGrainIndex() {
+  grainIndexCount = 0;
+  recordingIndexCount = 0;
+  recentGrainUsed = 0;
+  recentGrainWrite = 0;
+}
+
+bool addGrainToIndex(uint16_t fileNumber, uint32_t startMs, uint32_t durationMs) {
+  if (grainIndexCount >= GRAIN_INDEX_CAPACITY) {
+    return false;
+  }
+  if (recordingIndexCount == 0 || recordingIndex[recordingIndexCount - 1].file != fileNumber) {
+    if (recordingIndexCount >= RECORDING_INDEX_CAPACITY) {
+      return false;
+    }
+    RecordingEntry &rec = recordingIndex[recordingIndexCount++];
+    rec.file = fileNumber;
+    rec.grainCount = 0;
+    rec.firstGrain = grainIndexCount;
+  }
+  GrainEntry &entry = grainIndex[grainIndexCount++];
+  entry.file = fileNumber;
+  entry.startMs = startMs;
+  entry.durationMs = durationMs;
+  recordingIndex[recordingIndexCount - 1].grainCount++;
+  return true;
+}
+
+void loadGrainIndex() {
+  clearGrainIndex();
+  FsFile file = SD.sdfs.open(GRAINS_FILE, O_RDONLY);
+  if (file) {
+    char line[48];
+    GrainInfo grain;
+    uint16_t number = 0;
+    uint32_t skipped = 0;
+    while (file.available()) {
+      if (!readCsvLine(file, line, sizeof(line))) {
+        continue;  // blank line
+      }
+      if (!parseGrainLine(line, grain) || !fileNumberFromName(grain.filename, number) ||
+          !addGrainToIndex(number, grain.startMs, grain.durationMs)) {
+        skipped++;
+      }
+      if ((grainIndexCount & 0xFFUL) == 0) {
+        kickWatchdog();
+      }
+    }
+    file.close();
+    if (skipped > 0) {
+      Serial.print("GRAINS.CSV lines skipped: ");
+      Serial.println(skipped);
+    }
+  }
+  grainCount = grainIndexCount;
+}
+
+uint32_t countGrains() {
+  return grainIndexCount;
+}
+
+void grainFromIndex(uint32_t index, GrainInfo &grain) {
+  const GrainEntry &entry = grainIndex[index];
+  makeFilename(grain.filename, entry.file);
+  grain.startMs = entry.startMs;
+  grain.durationMs = entry.durationMs;
+}
+
 bool isRecentGrainIndex(uint32_t index) {
   for (uint8_t i = 0; i < recentGrainUsed; ++i) {
     if (recentGrainIndexes[i] == index) {
@@ -318,51 +384,54 @@ void rememberGrainIndex(uint32_t index) {
   }
 }
 
-bool isRecentRecordingFilename(const char *filename) {
-  if (nextIndex <= 1 || filename[0] != 'W') {
-    return false;
+uint8_t logosRecentBiasPercent() {
+  if (logosDensityMode == LOGOS_MODE_SWARM) {
+    return LOGOS_RECENT_BIAS_SWARM;
   }
-  const uint16_t fileIndex = static_cast<uint16_t>(atoi(filename + 1));
-  const uint16_t latest = nextIndex - 1;
-  const uint16_t window = logosDensityMode == LOGOS_MODE_SWARM ? 4 : 2;
-  return fileIndex <= latest && fileIndex + window > latest;
+  if (logosDensityMode == LOGOS_MODE_SPARSE) {
+    return LOGOS_RECENT_BIAS_SPARSE;
+  }
+  return LOGOS_RECENT_BIAS_PERCENT;
 }
 
+// A grain of this recording, avoiding the recently played ones when it can.
+uint32_t pickGrainInRecording(const RecordingEntry &rec) {
+  uint32_t index = rec.firstGrain + nextRandomU32() % rec.grainCount;
+  for (uint8_t attempt = 0; attempt < 6 && rec.grainCount > 1 && isRecentGrainIndex(index); ++attempt) {
+    index = rec.firstGrain + nextRandomU32() % rec.grainCount;
+  }
+  return index;
+}
+
+// One of the newest recordings (the last 2, or 4 in swarm mode).
 bool selectRecentRecordingGrain(GrainInfo &grain) {
-  FsFile file = SD.sdfs.open(GRAINS_FILE, O_RDONLY);
-  if (!file) {
+  if (recordingIndexCount == 0 || nextIndex <= 1) {
     return false;
   }
-
-  char line[48];
-  GrainInfo candidate;
-  uint32_t index = 0;
-  uint32_t matches = 0;
-  uint32_t chosenIndex = 0;
-  bool found = false;
-  while (readCsvLine(file, line, sizeof(line))) {
-    if (parseGrainLine(line, candidate) && isRecentRecordingFilename(candidate.filename) && !isRecentGrainIndex(index)) {
-      matches++;
-      if ((nextRandomU32() % matches) == 0) {
-        grain = candidate;
-        chosenIndex = index;
-        found = true;
-      }
-    }
-    index++;
+  const uint32_t latest = nextIndex - 1;
+  const uint32_t window = logosDensityMode == LOGOS_MODE_SWARM ? 4 : 2;
+  uint32_t first = recordingIndexCount;  // the index is in archive order: newest last
+  while (first > 0 && recordingIndex[first - 1].file <= latest && recordingIndex[first - 1].file + window > latest) {
+    first--;
   }
-  file.close();
-  if (found) {
-    rememberGrainIndex(chosenIndex);
+  const uint32_t candidates = recordingIndexCount - first;
+  if (candidates == 0) {
+    return false;
   }
-  return found;
+  const uint32_t index = pickGrainInRecording(recordingIndex[first + nextRandomU32() % candidates]);
+  if (isRecentGrainIndex(index)) {
+    return false;
+  }
+  grainFromIndex(index, grain);
+  rememberGrainIndex(index);
+  return true;
 }
 
-// Timed wrapper: the CSV scan blocks loop() while play queues drain, so `d`
-// reports how long a grain choice takes.
+// Timed wrapper: a grain choice runs inside loop() while play queues drain,
+// so `d` reports how long it takes (2 ms with the old CSV scan at 16 lines).
 bool selectRandomGrain(GrainInfo &grain) {
   const uint32_t t0 = micros();
-  const bool found = selectRandomGrainFromCsv(grain);
+  const bool found = selectRandomGrainFromIndex(grain);
   grainSelectLastUs = micros() - t0;
   if (grainSelectLastUs > grainSelectMaxUs) {
     grainSelectMaxUs = grainSelectLastUs;
@@ -370,48 +439,25 @@ bool selectRandomGrain(GrainInfo &grain) {
   return found;
 }
 
-bool selectRandomGrainFromCsv(GrainInfo &grain) {
-  grainCount = countGrains();
-  if (grainCount == 0) {
+bool selectRandomGrainFromIndex(GrainInfo &grain) {
+  grainCount = grainIndexCount;
+  if (recordingIndexCount == 0) {
     return false;
   }
-
-  uint8_t recentBias = LOGOS_RECENT_BIAS_PERCENT;
-  if (logosDensityMode == LOGOS_MODE_SWARM) {
-    recentBias = 62;
-  } else if (logosDensityMode == LOGOS_MODE_SPARSE) {
-    recentBias = 24;
-  }
-  if ((nextRandomU32() % 100UL) < recentBias && selectRecentRecordingGrain(grain)) {
+  if ((nextRandomU32() % 100UL) < logosRecentBiasPercent() && selectRecentRecordingGrain(grain)) {
     return true;
   }
-
-  uint32_t target = nextRandomU32() % grainCount;
-  if (grainCount > LOGOS_RECENT_HISTORY) {
-    for (uint8_t attempt = 0; attempt < 10 && isRecentGrainIndex(target); ++attempt) {
-      target = nextRandomU32() % grainCount;
-    }
-  }
-  FsFile file = SD.sdfs.open(GRAINS_FILE, O_RDONLY);
-  if (!file) {
-    return false;
-  }
-
-  char line[48];
+  // Every recording equally likely: a 30 s monologue does not outweigh a 2 s whisper.
   uint32_t index = 0;
-  bool found = false;
-  while (readCsvLine(file, line, sizeof(line))) {
-    if (index == target) {
-      found = parseGrainLine(line, grain);
+  for (uint8_t attempt = 0; attempt < 10; ++attempt) {
+    index = pickGrainInRecording(recordingIndex[nextRandomU32() % recordingIndexCount]);
+    if (grainIndexCount <= LOGOS_RECENT_HISTORY || !isRecentGrainIndex(index)) {
       break;
     }
-    index++;
   }
-  file.close();
-  if (found) {
-    rememberGrainIndex(target);
-  }
-  return found;
+  grainFromIndex(index, grain);
+  rememberGrainIndex(index);
+  return true;
 }
 
 bool appendGrain(const char *filename, uint32_t startMs, uint32_t durationMs) {
@@ -427,6 +473,10 @@ bool appendGrain(const char *filename, uint32_t startMs, uint32_t durationMs) {
   file.println(durationMs);
   const bool ok = file.sync();
   file.close();
+  uint16_t number = 0;
+  if (ok && fileNumberFromName(filename, number) && !addGrainToIndex(number, startMs, durationMs)) {
+    Serial.println("Grain index full; grain kept on SD only.");
+  }
   return ok;
 }
 

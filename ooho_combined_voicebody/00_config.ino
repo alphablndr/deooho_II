@@ -27,6 +27,15 @@ constexpr float OUTPUT_RETURN_SECONDS = 1.5f;   // and comes back after release
 // pulses leak into the mic input as the 344.5 Hz hum (measured 2026-10-14:
 // -38 dBFS with synthesis, -47 dBFS without). The cube is silent while it
 // records, so synthesis pauses once the duck has faded out.
+// Unattended running: SD trouble never silences the cube, a hang reboots it.
+constexpr uint8_t SD_FAILURES_BEFORE_REBOOT = 3;   // in a row; a reboot re-inits the card
+constexpr uint32_t SD_RETRY_INTERVAL_MS = 5000;    // no card at boot: try again this often
+constexpr uint32_t WATCHDOG_TIMEOUT_S = 8;         // loop() must check in at least this often
+
+// Grain index kept in PSRAM (GRAINS.CSV is read once at boot).
+constexpr uint32_t GRAIN_INDEX_CAPACITY = 20000;
+constexpr uint32_t RECORDING_INDEX_CAPACITY = 10000;
+
 constexpr uint32_t MAX_TAKE_BLOCKS = FIELD_RECORD_BYTES / 2 / AUDIO_BLOCK_SAMPLES + 1;
 constexpr uint32_t SYNTH_PAUSE_AFTER_MS = static_cast<uint32_t>(OUTPUT_DUCK_SECONDS * 1000.0f) + 20;
 
@@ -195,7 +204,11 @@ constexpr uint8_t LOGOS_ARCHIVE_INTERVAL_REDUCTION = 38;
 constexpr uint8_t LOGOS_ARCHIVE_SWARM_INTERVAL_REDUCTION = 52;
 constexpr uint8_t LOGOS_ARCHIVE_DORMANT_REDUCTION = 62;
 constexpr uint8_t LOGOS_ARCHIVE_VOICE_BOOST_MAX = 3;
-constexpr uint8_t LOGOS_RECENT_BIAS_PERCENT = 42;
+// Chance that the next grain comes from the newest recordings, by density
+// mode (Anton 2026-10-13: a small preference; was 24 / 42 / 62).
+constexpr uint8_t LOGOS_RECENT_BIAS_SPARSE = 8;
+constexpr uint8_t LOGOS_RECENT_BIAS_PERCENT = 12;
+constexpr uint8_t LOGOS_RECENT_BIAS_SWARM = 18;
 constexpr uint8_t LOGOS_WAVESET_BOUNDARIES = 96;
 constexpr uint8_t LOGOS_WAVESET_MIN_GROUPS = 2;
 constexpr uint8_t LOGOS_WAVESET_MAX_GROUPS = 9;
@@ -314,6 +327,18 @@ struct LogosStream {
   uint32_t currentDurationMs = 0;
 };
 
+struct GrainEntry {       // one GRAINS.CSV line, in PSRAM
+  uint16_t file;          // recording number: W0001.WAV -> 1
+  uint32_t startMs;
+  uint32_t durationMs;
+};
+
+struct RecordingEntry {   // grains of one recording are contiguous in the index
+  uint16_t file;
+  uint16_t grainCount;
+  uint32_t firstGrain;
+};
+
 struct WavesetIndex {
   uint32_t boundary[LOGOS_WAVESET_BOUNDARIES];
   uint8_t count = 0;
@@ -338,6 +363,10 @@ void startRecording();
 bool processRecording();
 void stopRecording();
 void setOutputLevel(float target, float seconds);
+void startWatchdog();
+void kickWatchdog();
+void rebootNow(const char *why);
+void noteSdFailure(const char *what);
 
 uint32_t nextRandomU32();
 float nextRandomBipolar();
@@ -386,9 +415,15 @@ bool readCsvLine(FsFile &file, char *line, size_t maxLen);
 bool parseGrainLine(const char *line, GrainInfo &grain);
 bool isRecentGrainIndex(uint32_t index);
 void rememberGrainIndex(uint32_t index);
-bool isRecentRecordingFilename(const char *filename);
+bool fileNumberFromName(const char *name, uint16_t &number);
+void clearGrainIndex();
+bool addGrainToIndex(uint16_t fileNumber, uint32_t startMs, uint32_t durationMs);
+void loadGrainIndex();
+void grainFromIndex(uint32_t index, GrainInfo &grain);
+uint8_t logosRecentBiasPercent();
+uint32_t pickGrainInRecording(const RecordingEntry &rec);
 bool selectRecentRecordingGrain(GrainInfo &grain);
-bool selectRandomGrainFromCsv(GrainInfo &grain);
+bool selectRandomGrainFromIndex(GrainInfo &grain);
 bool selectRandomGrain(GrainInfo &grain);
 bool appendGrain(const char *filename, uint32_t startMs, uint32_t durationMs);
 

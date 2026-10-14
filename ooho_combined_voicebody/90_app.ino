@@ -325,6 +325,12 @@ void handleSerial() {
       rebuildGrainsFromArchive();
     } else if (command == 'y' || command == 'Y') {
       startMelosSweep();
+    } else if (command == 'w' || command == 'W') {
+      // Bench test only: loop() stops checking in, the watchdog must reboot.
+      Serial.println("Watchdog test: hanging now, expect a reboot within ~8 s.");
+      Serial.flush();
+      while (true) {
+      }
     }
   }
 }
@@ -410,9 +416,19 @@ void setup() {
     Serial.println("Input: Audio Shield MIC for a raw electret capsule, not MAX4466.");
   }
 
-  if (!SD.begin(BUILTIN_SDCARD)) {
-    Serial.println("SD init failed. Use the Teensy 4.1 built-in microSD slot.");
+  bool sdReady = false;
+  for (uint8_t attempt = 0; attempt < 3 && !sdReady; ++attempt) {
+    sdReady = SD.begin(BUILTIN_SDCARD);
+    if (!sdReady) {
+      delay(300);
+    }
+  }
+  if (!sdReady) {
+    // No card: stay silent and keep trying; loop() reboots once it answers.
+    Serial.println("SD init failed. Use the Teensy 4.1 built-in microSD slot. Retrying every 5 s.");
     enterState(ERROR_STATE);
+    lastSdRetryMs = millis();
+    startWatchdog();
     return;
   }
 
@@ -430,7 +446,7 @@ void setup() {
   loadModel();
   initMelosSynth();
   nextIndex = loadCounter();
-  grainCount = countGrains();
+  loadGrainIndex();
 
   Serial.print("Record buffer: ");
   Serial.print(activeRecordCapacity);
@@ -441,16 +457,27 @@ void setup() {
   makeFilename(currentFilename, nextIndex);
   Serial.println(currentFilename);
   Serial.print("LOGOS grains: ");
-  Serial.println(grainCount);
+  Serial.print(grainCount);
+  Serial.print(" from ");
+  Serial.print(recordingIndexCount);
+  Serial.println(" recordings (index in PSRAM).");
   Serial.println("Record button pin 32: hold to record, release to process.");
-  Serial.println("Serial: r=record toggle, s=stop, t=tone, m=model, g=grains, d=diagnostics, n=LOGOS now, e=(no render), x=rebuild grains, y=exciter sweep.");
+  Serial.println("Serial: r=record toggle, s=stop, t=tone, m=model, g=grains, d=diagnostics, n=LOGOS now, e=(no render), x=rebuild grains, y=exciter sweep, w=watchdog test (hangs!).");
   Serial.println("MELOS is real-time synthesized; LOGOS is a 4-stream PSRAM crowd with reverse/rate.");
 
   enterState(IDLE);
   initializeLogosSchedulers();
+  startWatchdog();
 }
 
 void loop() {
+  kickWatchdog();
+  if (state == ERROR_STATE && millis() - lastSdRetryMs >= SD_RETRY_INTERVAL_MS) {
+    lastSdRetryMs = millis();
+    if (SD.begin(BUILTIN_SDCARD)) {
+      rebootNow("SD card answers again");
+    }
+  }
   handleSerial();
   updateButton(recordButton);
   handleRecordButton();

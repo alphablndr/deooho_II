@@ -187,7 +187,7 @@ void appendLogosGrains() {
     workTick();
   }
 
-  grainCount += added;
+  grainCount = grainIndexCount;
   Serial.print("LOGOS grains added: ");
   Serial.println(added);
 }
@@ -435,6 +435,7 @@ void rebuildGrainsFromArchive() {
   if (SD.exists(GRAINS_FILE)) {
     SD.remove(GRAINS_FILE);
   }
+  clearGrainIndex();  // appendGrain() refills it file by file
   grainCount = 0;
 
   uint32_t filesDone = 0;

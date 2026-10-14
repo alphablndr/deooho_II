@@ -41,8 +41,59 @@ bool playbackServiceAllowed() {
 }
 
 void workTick() {
+  kickWatchdog();
   updateStatusLed();
   servicePlaybackDuringWork();
+}
+
+// Hardware watchdog (RTWDOG / WDOG3). avr/wdt.h is an empty stub on Teensy 4,
+// so the registers are set directly. Clock: 32.768 kHz LPO / 256 = 128 Hz.
+void startWatchdog() {
+  CCM_CCGR5 |= CCM_CCGR5_WDOG3(3);
+  __disable_irq();
+  WDOG3_CNT = 0xD928C520;  // unlock
+  while (!(WDOG3_CS & WDOG_CS_ULK)) {
+  }
+  WDOG3_WIN = 0;
+  WDOG3_TOVAL = WATCHDOG_TIMEOUT_S * 128UL;
+  WDOG3_CS = WDOG_CS_EN | WDOG_CS_CLK(1) | WDOG_CS_PRES | WDOG_CS_CMD32EN | WDOG_CS_UPDATE | WDOG_CS_FLG;
+  while (!(WDOG3_CS & WDOG_CS_RCS)) {
+  }
+  __enable_irq();
+  Serial.print("Watchdog on: ");
+  Serial.print(WATCHDOG_TIMEOUT_S);
+  Serial.println(" s.");
+}
+
+void kickWatchdog() {
+  WDOG3_CNT = 0xB480A602;  // refresh
+}
+
+void rebootNow(const char *why) {
+  Serial.print("Rebooting: ");
+  Serial.println(why);
+  Serial.flush();
+  delay(50);
+  SCB_AIRCR = 0x05FA0004;
+  while (true) {
+  }
+}
+
+// SD trouble never silences the cube: the cube keeps playing and the take (or
+// file) is dropped. Several failures in a row mean the card needs a fresh
+// start, which a reboot gives (counter and grains are read back from the card).
+void noteSdFailure(const char *what) {
+  if (sdFailureStreak < 255) {
+    sdFailureStreak++;
+  }
+  Serial.print("SD failure: ");
+  Serial.print(what);
+  Serial.print(" (");
+  Serial.print(sdFailureStreak);
+  Serial.println(" in a row).");
+  if (sdFailureStreak >= SD_FAILURES_BEFORE_REBOOT) {
+    rebootNow("SD keeps failing");
+  }
 }
 
 void updateButton(DebouncedButton &button) {
@@ -271,6 +322,9 @@ void removeBlockRateHum() {
   }
 }
 
+// Returns false only when the take itself could not be stored. Later SD
+// hiccups (model, counter) are counted by noteSdFailure() but never lose the
+// take or stop the cube.
 bool processRecording() {
   enterState(PROCESSING);
 
@@ -282,24 +336,24 @@ bool processRecording() {
   if (!saveRawRecording()) {
     return false;
   }
+  // The WAV is on the card: claim its number now, so a failed counter write
+  // can never make the next take collide with this file.
+  if (nextIndex < 9999) {
+    nextIndex++;
+  } else {
+    Serial.println("Recording index exhausted at W9999.WAV.");
+  }
 
   appendLogosGrains();
   updateCollectiveModel();
-  if (!saveModel()) {
-    return false;
-  }
   // MELOS is live-synthesized: no render. Refresh the smoothed envelope so the
   // synth eases toward the updated collective voice.
   computeMelosEnvelope();
-
-  if (nextIndex < 9999) {
-    nextIndex++;
-    if (!saveCounter(nextIndex)) {
-      return false;
-    }
-  } else {
-    Serial.println("Recording index exhausted at W9999.WAV.");
-    return false;
+  if (!saveModel()) {
+    noteSdFailure("MODEL.BIN not saved, model kept in memory");
+  }
+  if (!saveCounter(nextIndex)) {
+    noteSdFailure("COUNTER.TXT not saved, next boot rescans the card");
   }
 
   Serial.print("Audio CPU max: ");
@@ -333,9 +387,14 @@ void stopRecording() {
     return;
   }
 
+  const uint8_t failuresBefore = sdFailureStreak;
   if (!processRecording()) {
-    enterState(ERROR_STATE);
-    return;
+    if (SD.exists(tempFilename)) {
+      SD.remove(tempFilename);
+    }
+    noteSdFailure("take not saved");
+  } else if (sdFailureStreak == failuresBefore) {
+    sdFailureStreak = 0;  // a clean take: the card is fine
   }
 
   enterState(IDLE);
