@@ -29,6 +29,7 @@ LOGOS_MIN_RMS_THRESHOLD = 0.008
 LOGOS_MAX_RMS_THRESHOLD = 0.090
 LOGOS_WINDOW_PEAK_FACTOR = 0.18
 LOGOS_HYST_FACTOR = 0.45
+LOGOS_HISS_CONTINUE_FACTOR = 1.6
 LOGOS_SPLIT_SEARCH_MS = 260
 LOGOS_ZC_SEARCH_SAMPLES = 256
 ANALYSIS_RATE = 11025
@@ -187,6 +188,11 @@ def segment_grains(samples, filename):
         total_energy += r * r * LOGOS_WINDOW_SAMPLES
     start_thr = clamp(max_rms * LOGOS_WINDOW_PEAK_FACTOR, LOGOS_MIN_RMS_THRESHOLD, LOGOS_MAX_RMS_THRESHOLD)
     cont_thr = start_thr * LOGOS_HYST_FACTOR
+    # Same as firmware: the continue threshold stays above the take's hiss
+    # (10th-percentile window), so quiet whispers do not become one hiss grain.
+    hiss = sorted(rms)[len(rms) // 10]
+    cont_thr = max(cont_thr, hiss * LOGOS_HISS_CONTINUE_FACTOR)
+    start_thr = max(start_thr, cont_thr * 1.05)
     gap_windows = max(1, (LOGOS_GAP_TOLERANCE_MS * (SAMPLE_RATE // 1000)) // LOGOS_WINDOW_SAMPLES)
 
     grains = []

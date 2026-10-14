@@ -1,4 +1,5 @@
 float logosWindowRms[LOGOS_MAX_WINDOWS];
+float logosWindowScratch[LOGOS_MAX_WINDOWS];  // sorted copy for the hiss level
 
 // Snap a boundary to the nearest zero crossing within a small radius.
 uint32_t snapToZeroCrossing(const int16_t *samples, uint32_t total, uint32_t pos, uint32_t radius) {
@@ -126,7 +127,22 @@ void appendLogosGrains() {
   }
 
   float startThreshold = constrain(maxWindowRms * LOGOS_WINDOW_PEAK_FACTOR, LOGOS_MIN_RMS_THRESHOLD, LOGOS_MAX_RMS_THRESHOLD);
-  const float continueThreshold = startThreshold * LOGOS_HYST_FACTOR;
+  float continueThreshold = startThreshold * LOGOS_HYST_FACTOR;
+  // The continue threshold must stay above the take's own hiss, or a run never
+  // ends in a pause and a quiet whisper becomes one grain that is mostly hiss
+  // (2026-10-14: 64-85 % hiss in whisper grains; Anton preferred the fix by
+  // ear). The 10th-percentile window is this take's hiss level.
+  for (uint32_t w = 0; w < windowCount; ++w) {
+    logosWindowScratch[w] = logosWindowRms[w];
+  }
+  std::nth_element(logosWindowScratch, logosWindowScratch + windowCount / 10, logosWindowScratch + windowCount);
+  const float hissLevel = logosWindowScratch[windowCount / 10];
+  if (continueThreshold < hissLevel * LOGOS_HISS_CONTINUE_FACTOR) {
+    continueThreshold = hissLevel * LOGOS_HISS_CONTINUE_FACTOR;
+  }
+  if (startThreshold < continueThreshold * 1.05f) {
+    startThreshold = continueThreshold * 1.05f;
+  }
 
   const float overallRms = sqrtf(totalEnergy / (static_cast<double>(windowCount) * LOGOS_WINDOW_SAMPLES));
   Serial.print("LOGOS analysis: duration_ms=");
@@ -139,6 +155,8 @@ void appendLogosGrains() {
   Serial.print(startThreshold, 5);
   Serial.print(", contThr=");
   Serial.print(continueThreshold, 5);
+  Serial.print(", hiss=");
+  Serial.print(hissLevel, 5);
   Serial.print(", windows=");
   Serial.println(windowCount);
 

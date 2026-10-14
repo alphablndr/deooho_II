@@ -158,6 +158,7 @@ constexpr float LOGOS_WINDOW_PEAK_FACTOR = 0.18f;
 // Smarter grain slicing: hysteresis (capture consonants/soft edges), split long
 // regions at the quietest internal point, snap grain edges to zero crossings.
 constexpr float LOGOS_HYST_FACTOR = 0.45f;          // continue threshold = start * this
+constexpr float LOGOS_HISS_CONTINUE_FACTOR = 1.6f;  // ...but never below the take's hiss * this
 constexpr uint32_t LOGOS_SPLIT_SEARCH_MS = 260;     // search radius for a quiet cut
 constexpr uint32_t LOGOS_ZC_SEARCH_SAMPLES = 256;   // ~6 ms zero-crossing snap radius
 constexpr uint32_t LOGOS_MAX_WINDOWS = ((FIELD_RECORD_BYTES / 2) / LOGOS_WINDOW_SAMPLES) + 2;
