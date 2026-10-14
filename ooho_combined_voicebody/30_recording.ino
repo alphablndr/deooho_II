@@ -34,6 +34,9 @@ void enterState(DeviceState nextState) {
 }
 
 bool playbackServiceAllowed() {
+  if (state == RECORDING && synthPaused) {
+    return false;
+  }
   return (state == IDLE || state == RECORDING || state == PROCESSING) && !diagnosticToneOn;
 }
 
@@ -160,6 +163,8 @@ void startRecording() {
   }
   recordBytesUsed = 0;
   recordSkipBytesLeft = RECORD_TRIM_START_MS * (SAMPLE_RATE / 1000UL) * 2UL;
+  synthPaused = false;
+  synthPauseByte = 0;
   recordingStartedMs = millis();
   recordOverflow = false;
   AudioProcessorUsageMaxReset();
@@ -180,17 +185,17 @@ void startRecording() {
 // averaging all blocks gives its waveform (speech averages out) and we subtract
 // it. This also removes DC. Takes start on a block boundary, so sample i sits
 // at block position i % AUDIO_BLOCK_SAMPLES.
-void removeBlockRateHum() {
+// firstSample must sit on a block boundary.
+void removeHumInRange(uint32_t firstSample, uint32_t endSample) {
   int16_t *samples = reinterpret_cast<int16_t *>(activeRecordBuffer);
-  const uint32_t totalSamples = recordBytesUsed / 2;
-  const uint32_t blocks = totalSamples / AUDIO_BLOCK_SAMPLES;
+  const uint32_t blocks = (endSample - firstSample) / AUDIO_BLOCK_SAMPLES;
   if (blocks < 8) {
     return;
   }
 
   int32_t sum[AUDIO_BLOCK_SAMPLES] = {0};  // 30 s max: 10336 blocks * 32767 fits int32
   for (uint32_t b = 0; b < blocks; ++b) {
-    const int16_t *block = samples + b * AUDIO_BLOCK_SAMPLES;
+    const int16_t *block = samples + firstSample + b * AUDIO_BLOCK_SAMPLES;
     for (uint16_t j = 0; j < AUDIO_BLOCK_SAMPLES; ++j) {
       sum[j] += block[j];
     }
@@ -206,7 +211,7 @@ void removeBlockRateHum() {
     humEnergy += static_cast<double>(hum[j]) * hum[j];
   }
 
-  for (uint32_t i = 0; i < totalSamples; ++i) {
+  for (uint32_t i = firstSample; i < endSample; ++i) {
     const int32_t v = static_cast<int32_t>(samples[i]) - hum[i % AUDIO_BLOCK_SAMPLES];
     samples[i] = static_cast<int16_t>(constrain(v, -32768L, 32767L));
     if ((i & 0x7FFFUL) == 0) {
@@ -215,7 +220,25 @@ void removeBlockRateHum() {
   }
 
   Serial.print("Block-rate hum removed: rms=");
-  Serial.println(sqrtf(humEnergy / AUDIO_BLOCK_SAMPLES) / 32768.0f, 5);
+  Serial.print(sqrtf(humEnergy / AUDIO_BLOCK_SAMPLES) / 32768.0f, 5);
+  Serial.print(" over ");
+  Serial.print((endSample - firstSample) * 1000UL / SAMPLE_RATE);
+  Serial.println(" ms");
+}
+
+// The hum is stronger while synthesis still runs (during the duck fade), so the
+// take is cleaned as two parts, each with its own hum waveform.
+void removeBlockRateHum() {
+  const uint32_t totalSamples = recordBytesUsed / 2;
+  uint32_t split = static_cast<uint32_t>(synthPauseByte / 2);
+  split -= split % AUDIO_BLOCK_SAMPLES;
+  const uint32_t minPart = 8UL * AUDIO_BLOCK_SAMPLES;
+  if (split < minPart || split + minPart > totalSamples) {
+    removeHumInRange(0, totalSamples);
+  } else {
+    removeHumInRange(0, split);
+    removeHumInRange(split, totalSamples);
+  }
 }
 
 bool processRecording() {

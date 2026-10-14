@@ -457,6 +457,10 @@ void loop() {
 
   if (state == RECORDING) {
     drainRecordQueue();
+    if (!synthPaused && millis() - recordingStartedMs >= SYNTH_PAUSE_AFTER_MS) {
+      synthPaused = true;  // duck has faded out: stop the hum-making synthesis
+      synthPauseByte = recordBytesUsed;
+    }
     if (millis() - recordingStartedMs >= MAX_RECORD_MS) {
       Serial.println("Max recording time reached; auto-stopping recording.");
       stopRecording();

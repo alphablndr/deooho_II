@@ -6,7 +6,7 @@ constexpr uint32_t SAMPLE_RATE = 44100;
 constexpr uint16_t AUDIO_MEMORY_BLOCKS = 360;
 constexpr size_t SD_WRITE_CHUNK_BYTES = 4096;
 constexpr float STARTUP_VOLUME = 0.18f;
-constexpr uint8_t LINE_IN_LEVEL = 7;
+constexpr uint8_t LINE_IN_LEVEL = 5;  // was 7: loud voices clipped (2026-10-13), 5 = +3 dB headroom
 constexpr bool USE_MAX4466_LINEIN = true;
 
 constexpr uint32_t INTERNAL_RECORD_SECONDS = 3;
@@ -23,6 +23,11 @@ constexpr uint32_t RECORD_TRIM_END_MS = 100;    // release click, recorded befor
 constexpr uint32_t RECORD_MIN_SAVE_MS = 400;    // after trimming (~0.6 s button hold)
 constexpr float OUTPUT_DUCK_SECONDS = 0.35f;    // cube falls silent when recording starts (gently)
 constexpr float OUTPUT_RETURN_SECONDS = 1.5f;   // and comes back after release
+// Live MELOS/LOGOS synthesis runs in bursts once per audio block; its current
+// pulses leak into the mic input as the 344.5 Hz hum (measured 2026-10-14:
+// -38 dBFS with synthesis, -47 dBFS without). The cube is silent while it
+// records, so synthesis pauses once the duck has faded out.
+constexpr uint32_t SYNTH_PAUSE_AFTER_MS = static_cast<uint32_t>(OUTPUT_DUCK_SECONDS * 1000.0f) + 20;
 
 constexpr uint32_t MODEL_MAGIC = 0x4F4F484FUL;  // "OOHO"
 constexpr uint16_t MODEL_VERSION = 2;
@@ -326,6 +331,7 @@ void drainRecordQueue();
 void stopLogosPlayback();
 void stopAllPlayback();
 bool saveRawRecording();
+void removeHumInRange(uint32_t firstSample, uint32_t endSample);
 void removeBlockRateHum();
 void startRecording();
 bool processRecording();
