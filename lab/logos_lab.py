@@ -61,6 +61,20 @@ def save(path, x, sr):
         w.writeframes((x * 32767.0).astype("<i2").tobytes())
 
 
+def clean_teensy_take(x, sr):
+    """What the current firmware does to a fresh take (stage A), for older
+    Teensy recordings: drop the last 100 ms (button click) and subtract the
+    344.5 Hz block-rate hum, using the quieter half of the 128-sample blocks."""
+    x = x[:max(0, len(x) - int(0.100 * sr))]
+    n = len(x) // 128
+    if n >= 8:
+        blocks = x[:n * 128].reshape(n, 128)
+        energy = (blocks ** 2).sum(axis=1)
+        hum = blocks[energy <= np.median(energy)].mean(axis=0)
+        x = x - np.tile(hum, len(x) // 128 + 1)[:len(x)]
+    return x - x.mean()
+
+
 def bandpass(x, sr, lo, hi):
     spec = np.fft.rfft(x)
     f = np.fft.rfftfreq(len(x), 1.0 / sr)
@@ -167,10 +181,12 @@ def centroid(seg, sr):
     return float((mag * f).sum() / (mag.sum() + 1e-12))
 
 
-def build_corpus(paths):
+def build_corpus(paths, teensy_clean=False):
     corpus, audio, sr_all = [], {}, None
     for path in paths:
         x, sr = load_mono(path)
+        if teensy_clean:
+            x = clean_teensy_take(x, sr)
         sr_all = sr_all or sr
         name = os.path.basename(path)
         audio[name] = x
@@ -281,12 +297,13 @@ def main():
     ap.add_argument("source", help="folder with WAV recordings")
     ap.add_argument("out", help="folder for renders (outside git)")
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--teensy-clean", action="store_true", help="apply the firmware's click trim and hum removal first")
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     rng = np.random.default_rng(args.seed)
 
     paths = sorted(glob.glob(os.path.join(args.source, "*.WAV")) + glob.glob(os.path.join(args.source, "*.wav")))
-    corpus, audio, sr = build_corpus(paths)
+    corpus, audio, sr = build_corpus(paths, args.teensy_clean)
     with open(os.path.join(args.out, "A_corpus.csv"), "w", newline="") as fh:
         wr = csv.writer(fh)
         wr.writerow(["file", "idx", "start_s", "dur_s", "rms", "f0_hz", "voiced", "bright_hz"])
