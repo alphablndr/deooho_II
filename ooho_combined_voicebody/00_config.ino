@@ -31,7 +31,6 @@ constexpr float OUTPUT_RETURN_SECONDS = 1.5f;   // and comes back after release
 constexpr uint8_t SD_FAILURES_BEFORE_REBOOT = 3;   // in a row; a reboot re-inits the card
 constexpr uint32_t SD_RETRY_INTERVAL_MS = 5000;    // no card at boot: try again this often
 constexpr uint32_t WATCHDOG_TIMEOUT_S = 8;         // loop() must check in at least this often
-constexpr uint8_t GRAIN_READ_FAILURES_PER_SD_FAILURE = 12;  // LOGOS opens failing in a row
 
 // Grain index kept in PSRAM (GRAINS.CSV is read once at boot).
 constexpr uint32_t GRAIN_INDEX_CAPACITY = 20000;

@@ -145,7 +145,6 @@ EXTMEM RecordingEntry recordingIndex[RECORDING_INDEX_CAPACITY];  // ~80 KB
 uint32_t grainIndexCount = 0;
 uint32_t recordingIndexCount = 0;
 uint8_t sdFailureStreak = 0;     // SD failures in a row (reset by a clean take)
-uint8_t grainReadFailures = 0;   // LOGOS grain files that failed to open, in a row
 uint32_t lastSdRetryMs = 0;      // no card at boot: last SD.begin() attempt
 EXTMEM float humBlockEnergy[MAX_TAKE_BLOCKS];   // per-block loudness for hum removal
 EXTMEM float humEnergySorted[MAX_TAKE_BLOCKS];  // scratch copy for the median

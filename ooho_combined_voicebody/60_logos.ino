@@ -749,16 +749,17 @@ bool startLogosGrain(uint8_t index, const GrainInfo &grain, uint32_t extraOffset
   if (!file) {
     Serial.print("Could not open LOGOS source ");
     Serial.println(grain.filename);
-    // A pulled or dead card shows up here first: count it as SD trouble so the
-    // cube reboots and then waits silently for the card (2026-10-14 bench test).
-    // A single missing WAV on a healthy card (GRAINS.CSV still readable) is not.
-    if (!SD.exists(GRAINS_FILE) && ++grainReadFailures >= GRAIN_READ_FAILURES_PER_SD_FAILURE) {
-      grainReadFailures = 0;
-      noteSdFailure("LOGOS cannot read the card");
+    // A pulled or dead card shows up here first, and every attempt blocks
+    // loop() for ~3.5 s (bench test 2026-10-14: sound in 0.5 s bursts, button
+    // presses lost). If GRAINS.CSV is unreadable too, the card is gone: reboot
+    // now, then the cube waits silently and comes back when the card answers.
+    // A single missing WAV on a healthy card is not a reason to reboot.
+    kickWatchdog();
+    if (!SD.exists(GRAINS_FILE)) {
+      rebootNow("SD card unreadable");
     }
     return false;
   }
-  grainReadFailures = 0;
 
   const uint32_t availableStartMs = grain.startMs + extraOffsetMs;
   const uint32_t availableDurationMs = grain.durationMs - extraOffsetMs;
