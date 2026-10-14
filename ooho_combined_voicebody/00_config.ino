@@ -21,7 +21,7 @@ constexpr size_t FIELD_RECORD_BYTES = SAMPLE_RATE * 2UL * FIELD_RECORD_SECONDS;
 constexpr uint32_t RECORD_TRIM_START_MS = 80;   // cube fade-out tail + press click
 constexpr uint32_t RECORD_TRIM_END_MS = 100;    // release click, recorded before debounce confirms
 constexpr uint32_t RECORD_MIN_SAVE_MS = 400;    // after trimming (~0.6 s button hold)
-constexpr float OUTPUT_DUCK_SECONDS = 0.35f;    // cube falls silent when recording starts (gently)
+constexpr float OUTPUT_DUCK_SECONDS = 0.8f;     // cube falls silent when recording starts (gently; Anton asked twice)
 constexpr float OUTPUT_RETURN_SECONDS = 1.5f;   // and comes back after release
 // Live MELOS/LOGOS synthesis runs in bursts once per audio block; its current
 // pulses leak into the mic input as the 344.5 Hz hum (measured 2026-10-14:

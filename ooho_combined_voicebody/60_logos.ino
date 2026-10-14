@@ -1028,7 +1028,6 @@ bool startLogosGrain(uint8_t index, const GrainInfo &grain, uint32_t extraOffset
   stream.lastFeedUs = 0;
   stream.playing = true;
   exciteMelosFromLogos(index, stream.granular, stream.reversed, stream.rate);
-  setLogosStreamGain(index, 0.0f);
   if (clearWord && state == IDLE) {
     scheduleLogosResponse(index, grain);
   }
@@ -1061,7 +1060,10 @@ void finishLogosGrain(uint8_t index) {
   const uint8_t launchMode = stream.launchMode;
   stream.playing = false;
   stream.queuedFreshAudio = false;
-  setLogosStreamGain(index, 0.0f);
+  // No mixer gate here: the queue still holds up to ~70 ms of this grain
+  // (with its own 24 ms fade-out). Muting it now cut the tail mid-signal, and
+  // the next grain's gain-up resumed that tail abruptly: both were clicks
+  // (Anton 2026-10-14). Grains fade themselves; an empty queue is silent.
 
   // Only re-trigger from SD while idle, to avoid SD reads during processing.
   if (state == IDLE && wasClearWord && launchMode == LOGOS_LAUNCH_AUTO &&
