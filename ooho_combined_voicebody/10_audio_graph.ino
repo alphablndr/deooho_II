@@ -235,7 +235,12 @@ float melosArchivePitch[MELOS_PITCH_CAPACITY];      // real pitches of the archi
 uint16_t melosArchivePitchCount = 0;
 uint16_t melosArchivePitchWrite = 0;
 float melosClusterLog[MELOS_VOICE_COUNT];           // current pitch per voice, log2 Hz
-float melosClusterTarget[MELOS_VOICE_COUNT];        // person this voice is moving to, log2 Hz
+float melosClusterTarget[MELOS_VOICE_COUNT];        // next note (log2 Hz), taken while silent
+bool melosClusterTargetEntry[MELOS_VOICE_COUNT];    // the next note is the new take's
+uint8_t melosVoiceStage[MELOS_VOICE_COUNT];         // 0 sing, 1 fade out, 2 breath, 3 fade in, 4 wait to gather
+float melosVoiceAmp[MELOS_VOICE_COUNT];             // 0..1, S-curved when applied
+float melosVoiceFadeStep[MELOS_VOICE_COUNT];        // amp change per block
+uint32_t melosVoiceStageMs[MELOS_VOICE_COUNT];
 uint32_t melosClusterNextHopMs[MELOS_VOICE_COUNT];
 bool melosClusterEntry[MELOS_VOICE_COUNT];          // holding the new take's pitch
 float melosVoiceVowel[MELOS_VOICE_COUNT];           // own mouth: 0 oo .. 0.5 aa .. 1 ee

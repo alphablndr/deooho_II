@@ -307,13 +307,55 @@ void melosBlockUpdate() {
     // Choir of the archive's real pitches: each voice glides between people.
     const uint32_t now = millis();
     for (uint8_t v = 0; v < MELOS_VOICE_COUNT; ++v) {
-      if (static_cast<int32_t>(now - melosClusterNextHopMs[v]) >= 0) {
-        melosClusterTarget[v] = melosClusterPick();
-        melosClusterEntry[v] = false;
-        melosClusterNextHopMs[v] = now + randomRangeMs(MELOS_CLUSTER_HOP_MIN_MS, MELOS_CLUSTER_HOP_MAX_MS);
+      // Note changes go through silence: fade out, breathe, re-enter on the
+      // new note. No glissando.
+      const float randomFade = MELOS_NOTE_FADE_MIN_S + (MELOS_NOTE_FADE_MAX_S - MELOS_NOTE_FADE_MIN_S) *
+                                                           static_cast<float>(nextRandomU32() & 0xFFFFUL) / 65535.0f;
+      switch (melosVoiceStage[v]) {
+        case 0:  // singing
+          if (static_cast<int32_t>(now - melosClusterNextHopMs[v]) >= 0) {
+            melosClusterTarget[v] = melosClusterPick();
+            melosClusterTargetEntry[v] = false;
+            melosVoiceFadeStep[v] = blk / (randomFade * SAMPLE_RATE);
+            melosVoiceStage[v] = 1;
+          }
+          break;
+        case 4:  // a take arrived: wait for this voice's turn to gather
+          if (static_cast<int32_t>(now - melosVoiceStageMs[v]) >= 0) {
+            melosVoiceFadeStep[v] = blk / (MELOS_GATHER_FADE_S * SAMPLE_RATE);
+            melosVoiceStage[v] = 1;
+          }
+          break;
+        case 1:  // fading out
+          melosVoiceAmp[v] -= melosVoiceFadeStep[v];
+          if (melosVoiceAmp[v] <= 0.0f) {
+            melosVoiceAmp[v] = 0.0f;
+            melosClusterLog[v] = melosClusterTarget[v];  // the note changes while silent
+            melosClusterEntry[v] = melosClusterTargetEntry[v];
+            if (melosClusterEntry[v]) {
+              melosVoiceVowel[v] = melosEntryVowel;     // and comes back with the new voice's vowel
+            }
+            melosVoiceStageMs[v] = now + (melosClusterEntry[v] ? 200 : randomRangeMs(MELOS_NOTE_BREATH_MIN_MS, MELOS_NOTE_BREATH_MAX_MS));
+            melosVoiceStage[v] = 2;
+          }
+          break;
+        case 2:  // breath
+          if (static_cast<int32_t>(now - melosVoiceStageMs[v]) >= 0) {
+            melosVoiceFadeStep[v] = blk / ((melosClusterEntry[v] ? MELOS_GATHER_FADE_S : randomFade) * SAMPLE_RATE);
+            melosVoiceStage[v] = 3;
+          }
+          break;
+        default:  // 3: fading in on the new note
+          melosVoiceAmp[v] += melosVoiceFadeStep[v];
+          if (melosVoiceAmp[v] >= 1.0f) {
+            melosVoiceAmp[v] = 1.0f;
+            melosVoiceStage[v] = 0;
+            if (!melosClusterEntry[v]) {
+              melosClusterNextHopMs[v] = now + randomRangeMs(MELOS_CLUSTER_HOP_MIN_MS, MELOS_CLUSTER_HOP_MAX_MS);
+            }
+          }
+          break;
       }
-      const float ease = melosClusterEntry[v] ? MELOS_CLUSTER_ENTRY_EASE : MELOS_CLUSTER_GLIDE_EASE;
-      melosClusterLog[v] += (melosClusterTarget[v] - melosClusterLog[v]) * (ease * blk);
       melosVoiceDrift[v] += nextRandomGaussian(0.0006f);
       melosVoiceDrift[v] = constrain(melosVoiceDrift[v], -0.08f, 0.08f);
       const float semis = melosVoiceJitter[v] * 0.01f + melosVoiceDrift[v];
@@ -477,7 +519,7 @@ void melosBlockUpdate() {
       const float target = melosClusterEntry[v]
                                ? melosEntryVowel
                                : constrain(melosVoiceVowelCenter[v] + melosVoiceVowelWander[v] + sweep, 0.0f, 1.0f);
-      const float ease = melosClusterEntry[v] ? MELOS_CLUSTER_ENTRY_EASE : MELOS_VOICE_VOWEL_EASE;
+      const float ease = MELOS_VOICE_VOWEL_EASE;
       melosVoiceVowel[v] += (target - melosVoiceVowel[v]) * (ease * blk);
       float vf1, vf2, vf3, vDamp, vFric;
       melosFormantTargets(melosVoiceVowel[v], vf1, vf2, vf3);
@@ -608,10 +650,13 @@ void melosClusterEnter(float f0, float vowelPos) {
     return;
   }
   melosEntryVowel = vowelPos;
+  const uint32_t now = millis();
   for (uint8_t v = 0; v < MELOS_VOICE_COUNT; ++v) {
     melosClusterTarget[v] = log2f(f0);
-    melosClusterEntry[v] = true;
-    melosClusterNextHopMs[v] = millis() + MELOS_CLUSTER_GATHER_MS +
+    melosClusterTargetEntry[v] = true;
+    melosVoiceStage[v] = 4;  // each voice in turn: quick fade, re-enter on this note
+    melosVoiceStageMs[v] = now + randomRangeMs(0, MELOS_GATHER_START_MAX_MS);
+    melosClusterNextHopMs[v] = now + MELOS_CLUSTER_GATHER_MS +
                                randomRangeMs(MELOS_CLUSTER_DISPERSE_MIN_MS, MELOS_CLUSTER_DISPERSE_MAX_MS);
   }
 }
@@ -623,6 +668,11 @@ void initMelosSynth() {
   for (uint8_t v = 0; v < MELOS_VOICE_COUNT; ++v) {
     melosClusterLog[v] = melosArchivePitchCount > 0 ? melosClusterPick() : log2f(melosF0);
     melosClusterTarget[v] = melosClusterLog[v];
+    melosClusterTargetEntry[v] = false;
+    melosVoiceStage[v] = 0;
+    melosVoiceAmp[v] = 1.0f;
+    melosVoiceFadeStep[v] = 0.0f;
+    melosVoiceStageMs[v] = 0;
     melosClusterEntry[v] = false;
     melosClusterNextHopMs[v] = millis() + randomRangeMs(MELOS_CLUSTER_HOP_MIN_MS / 2, MELOS_CLUSTER_HOP_MAX_MS);
     static const float vowelSpread[MELOS_VOICE_COUNT] = {0.08f, 0.32f, 0.5f, 0.7f, 0.92f, 0.42f};
@@ -764,11 +814,13 @@ float melosNextSample() {
                          sineLookup(melosVoicePhase[v] * 3.0f) * 0.38f;
       const float src = lf * (MELOS_LF_TONE_GAIN * (0.78f + tenseV * 0.22f)) + edge * (MELOS_LF_BRIGHT_GAIN * tenseV);
       const float breath = melosVoiceBreath[v];
-      const float excV = src * melosTenseness * (1.0f - 0.85f * breath) +
-                         nextRandomBipolar() * (melosAspiration * MELOS_LF_ASPIRATION_GAIN * MELOS_CLUSTER_ASPIRATION *
-                                                    melosGlottalNoiseModulator(melosVoicePhase[v]) +
-                                                breath * 0.5f) +
-                         fricativeNoise;
+      const float amp = melosVoiceAmp[v] * melosVoiceAmp[v] * (3.0f - 2.0f * melosVoiceAmp[v]);
+      // amp: the voice fades out and in when it changes note (tone and its air)
+      const float excV = amp * (src * melosTenseness * (1.0f - 0.85f * breath) +
+                                nextRandomBipolar() * (melosAspiration * MELOS_LF_ASPIRATION_GAIN * MELOS_CLUSTER_ASPIRATION *
+                                                           melosGlottalNoiseModulator(melosVoicePhase[v]) +
+                                                       breath * 0.5f) +
+                                fricativeNoise);
       for (uint8_t k = 0; k < 3; ++k) {  // this voice's own mouth
         const float v3 = excV - melosVoiceFormantS2[v][k];
         const float v1 = melosVoiceFormantA1[v][k] * melosVoiceFormantS1[v][k] + melosVoiceFormantA2[v][k] * v3;

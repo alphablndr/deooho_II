@@ -76,8 +76,17 @@ constexpr bool MELOS_CLUSTER = true;
 constexpr uint16_t MELOS_PITCH_CAPACITY = 1024;
 constexpr uint32_t MELOS_CLUSTER_HOP_MIN_MS = 25000;   // Anton: slower movement
 constexpr uint32_t MELOS_CLUSTER_HOP_MAX_MS = 60000;
-// Anton: on a take ALL voices gather on its note and vowel over ~10 s, then
-// drift apart one by one over the next 2-8 s.
+// No glissandi (Anton 2026-10-15): a voice changes note like a choir singer -
+// it fades out (3-5 s), breathes (0.3-1.5 s) and comes back on the new note
+// (3-5 s). The pitch only changes while the voice is silent.
+constexpr float MELOS_NOTE_FADE_MIN_S = 3.0f;
+constexpr float MELOS_NOTE_FADE_MAX_S = 5.0f;
+constexpr uint32_t MELOS_NOTE_BREATH_MIN_MS = 300;
+constexpr uint32_t MELOS_NOTE_BREATH_MAX_MS = 1500;
+// Anton: on a take ALL voices gather on its note and vowel within ~10 s (one
+// by one: quick fade out, re-enter on the new note), then leave one by one.
+constexpr uint32_t MELOS_GATHER_START_MAX_MS = 4000;
+constexpr float MELOS_GATHER_FADE_S = 1.8f;
 constexpr uint32_t MELOS_CLUSTER_GATHER_MS = 10000;
 constexpr uint32_t MELOS_CLUSTER_DISPERSE_MIN_MS = 2000;
 constexpr uint32_t MELOS_CLUSTER_DISPERSE_MAX_MS = 8000;

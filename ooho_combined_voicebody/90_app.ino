@@ -193,6 +193,7 @@ void printDiagnostics() {
     Serial.print("Hz/");
     Serial.print(vowels[constrain(static_cast<int>(melosVoiceVowel[v] * 4.0f + 0.5f), 0, 4)]);
     Serial.print(melosVoiceBreath[v] > 0.5f ? "(whisper)" : "");
+    Serial.print(melosVoiceAmp[v] < 0.99f ? "~" : "");  // changing note through silence
     Serial.print(melosClusterEntry[v] ? "* " : " ");
   }
   Serial.println("");
