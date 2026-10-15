@@ -468,13 +468,7 @@ void melosBlockUpdate() {
       if (static_cast<int32_t>(now - melosVoiceVowelHopMs[v]) >= 0) {
         melosVoiceVowelCenter[v] = 0.05f + 0.9f * static_cast<float>(nextRandomU32() & 0xFFFFUL) / 65535.0f;
         melosVoiceVowelHopMs[v] = now + randomRangeMs(MELOS_VOWEL_HOP_MIN_MS, MELOS_VOWEL_HOP_MAX_MS);
-        // breath morphs too: whispered about as often as the archive is
-        const float whisperChance = constrain(1.0f - melosVoicedRatio, 0.1f, 0.5f);
-        melosVoiceBreathTarget[v] = static_cast<float>(nextRandomU32() & 0xFFFFUL) / 65535.0f < whisperChance
-                                        ? MELOS_WHISPER_BREATH
-                                        : 0.05f + 0.2f * static_cast<float>(nextRandomU32() & 0xFFFFUL) / 65535.0f;
       }
-      melosVoiceBreath[v] += (melosVoiceBreathTarget[v] - melosVoiceBreath[v]) * (MELOS_BREATH_MORPH_EASE * blk);
       melosVoiceSweepPhase[v] += melosVoiceSweepHz[v] * blk / SAMPLE_RATE;
       melosVoiceSweepPhase[v] -= floorf(melosVoiceSweepPhase[v]);
       melosVoiceVowelWander[v] = constrain(melosVoiceVowelWander[v] + nextRandomGaussian(0.003f),
@@ -483,7 +477,7 @@ void melosBlockUpdate() {
       const float target = melosClusterEntry[v]
                                ? melosEntryVowel
                                : constrain(melosVoiceVowelCenter[v] + melosVoiceVowelWander[v] + sweep, 0.0f, 1.0f);
-      const float ease = melosClusterEntry[v] ? MELOS_CLUSTER_ENTRY_EASE : MELOS_VOWEL_EASE;
+      const float ease = melosClusterEntry[v] ? MELOS_CLUSTER_ENTRY_EASE : MELOS_VOICE_VOWEL_EASE;
       melosVoiceVowel[v] += (target - melosVoiceVowel[v]) * (ease * blk);
       float vf1, vf2, vf3, vDamp, vFric;
       melosFormantTargets(melosVoiceVowel[v], vf1, vf2, vf3);
@@ -650,12 +644,10 @@ void initMelosSynth() {
     }
     melosVoiceFormantCoeffs(v);
   }
-  // As many whispering voices as the archive is whispered (at most 2) to start.
-  const uint8_t whisperers = constrain(static_cast<int>(roundf((1.0f - model.voicedRatio) * MELOS_VOICE_COUNT)), 0, 2);
   for (uint8_t v = 0; v < MELOS_VOICE_COUNT; ++v) {
-    melosVoiceBreath[v] = v >= MELOS_VOICE_COUNT - whisperers ? MELOS_WHISPER_BREATH : 0.05f + 0.04f * v;
-    melosVoiceBreathTarget[v] = melosVoiceBreath[v];
-    melosVoiceSweepHz[v] = 1.0f / (12.0f + 23.0f * static_cast<float>(nextRandomU32() & 0xFFFFUL) / 65535.0f);
+    melosVoiceBreath[v] = MELOS_VOICE_BREATH;
+    melosVoiceSweepHz[v] = 1.0f / (MELOS_VOWEL_SWEEP_MIN_S + (MELOS_VOWEL_SWEEP_MAX_S - MELOS_VOWEL_SWEEP_MIN_S) *
+                                                              static_cast<float>(nextRandomU32() & 0xFFFFUL) / 65535.0f);
     melosVoiceSweepPhase[v] = static_cast<float>(nextRandomU32() & 0xFFFFUL) / 65535.0f;
   }
   melosVoicedRatio = model.voicedRatio;
@@ -762,7 +754,10 @@ float melosNextSample() {
   if (cluster) {
     // Choir: every voice has its own glottis, breath and mouth.
     const uint8_t n = melosClusterVoices();
-    const float fricativeNoise = nextRandomBipolar() * melosFricativeMix * MELOS_FRONT_FRICATIVE_GAIN;
+    // The shared fricative is one noise for the whole body: split it over the
+    // mouths so that, after the 1/sqrt(n) below, it is as loud as one mouth's.
+    const float fricativeNoise = nextRandomBipolar() * melosFricativeMix * MELOS_FRONT_FRICATIVE_GAIN /
+                                 sqrtf(static_cast<float>(n));
     for (uint8_t v = 0; v < n; ++v) {
       melosVoicePhase[v] += melosVoiceF0[v] / SAMPLE_RATE;
       melosVoicePhase[v] -= floorf(melosVoicePhase[v]);

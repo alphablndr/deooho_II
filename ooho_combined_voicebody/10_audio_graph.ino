@@ -214,8 +214,7 @@ float melosVoiceVowel[MELOS_VOICE_COUNT];           // own mouth: 0 oo .. 0.5 aa
 float melosVoiceVowelCenter[MELOS_VOICE_COUNT];
 float melosVoiceVowelWander[MELOS_VOICE_COUNT];
 uint32_t melosVoiceVowelHopMs[MELOS_VOICE_COUNT];
-float melosVoiceBreath[MELOS_VOICE_COUNT];          // 0 voiced .. 0.8 whispering
-float melosVoiceBreathTarget[MELOS_VOICE_COUNT];
+float melosVoiceBreath[MELOS_VOICE_COUNT];          // trace of air per voice
 float melosVoiceSweepHz[MELOS_VOICE_COUNT];         // own vowel sweep rate
 float melosVoiceSweepPhase[MELOS_VOICE_COUNT];
 float melosVoiceFormantFreq[MELOS_VOICE_COUNT][3];
