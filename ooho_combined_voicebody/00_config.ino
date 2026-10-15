@@ -66,6 +66,18 @@ constexpr float MELOS_ENV_INC = 1.0f / (28.0f * SAMPLE_RATE);     // ~28 s envel
 constexpr float MELOS_PARTIAL_MAX_HZ = 8000.0f;
 constexpr uint16_t MELOS_SINE_SIZE = 2048;
 constexpr uint8_t MELOS_VOICE_COUNT = 6;
+// Pitch cluster (Anton 2026-10-15): instead of one average pitch, the MELOS
+// voices sing the real pitches of the people in the archive (PITCHES.CSV, one
+// per voiced take). Each voice glides from one person's pitch to another's
+// every 10-30 s; a new take enters the choir: 2-3 voices jump to its pitch in
+// unison and drift apart again after 30-60 s. Voices = takes, up to 6.
+// false = the previous single-centre MELOS, unchanged.
+constexpr bool MELOS_CLUSTER = true;
+constexpr uint16_t MELOS_PITCH_CAPACITY = 1024;
+constexpr uint32_t MELOS_CLUSTER_HOP_MIN_MS = 10000;
+constexpr uint32_t MELOS_CLUSTER_HOP_MAX_MS = 30000;
+constexpr uint32_t MELOS_CLUSTER_ENTRY_MIN_MS = 30000;
+constexpr uint32_t MELOS_CLUSTER_ENTRY_MAX_MS = 60000;
 constexpr uint8_t MELOS_TRACT_SECTIONS = 3;
 
 // MELOS collective vocal body (variant A): source-formant-filter engine.
@@ -112,6 +124,8 @@ constexpr float MELOS_LEARN_PULL = 0.85f;
 constexpr uint32_t MELOS_LEARN_HOLD_MS = 7000;
 constexpr uint32_t MELOS_LEARN_RETURN_MS = 40000;
 constexpr float MELOS_LEARN_GLIDE_EASE = 1.0f / (1.0f * SAMPLE_RATE);  // ~1 s pitch glide
+constexpr float MELOS_CLUSTER_GLIDE_EASE = 1.0f / (4.0f * SAMPLE_RATE);  // voice moves to another person
+constexpr float MELOS_CLUSTER_ENTRY_EASE = 1.0f / (0.8f * SAMPLE_RATE);  // the new voice arrives fast
 constexpr float MELOS_TONGUE_EASE = 1.0f / (2.6f * SAMPLE_RATE);
 constexpr float MELOS_TONGUE_DIAMETER_EASE = 1.0f / (1.8f * SAMPLE_RATE);
 constexpr float MELOS_ARTICULATION_DECAY = 1.0f / (1.7f * SAMPLE_RATE);
@@ -257,6 +271,7 @@ const char COUNTER_FILE[] = "COUNTER.TXT";
 const char GRAINS_FILE[] = "GRAINS.CSV";
 const char MODEL_FILE[] = "MODEL.BIN";
 const char MODEL_TEMP_FILE[] = "MODEL.TMP";
+const char PITCHES_FILE[] = "PITCHES.CSV";
 
 extern "C" uint8_t external_psram_size;
 
@@ -490,6 +505,11 @@ void melosUpdateMovingTract(float constr);
 float melosApplyMovingTract(float mouthOut);
 void melosBlockUpdate();
 void initMelosSynth();
+void loadMelosPitches();
+void clearMelosPitches();
+void appendMelosPitch(float f0);
+uint8_t melosClusterVoices();
+void melosClusterEnter(float f0);
 float melosNextSample();
 void feedMelosQueue();
 

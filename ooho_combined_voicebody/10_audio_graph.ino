@@ -203,6 +203,13 @@ float melosSine[MELOS_SINE_SIZE];
 
 // MELOS collective vocal body engine (source-formant-filter)
 float melosVoiceF0[MELOS_VOICE_COUNT];
+float melosArchivePitch[MELOS_PITCH_CAPACITY];      // real pitches of the archive's voiced takes
+uint16_t melosArchivePitchCount = 0;
+uint16_t melosArchivePitchWrite = 0;
+float melosClusterLog[MELOS_VOICE_COUNT];           // current pitch per voice, log2 Hz
+float melosClusterTarget[MELOS_VOICE_COUNT];        // person this voice is moving to, log2 Hz
+uint32_t melosClusterNextHopMs[MELOS_VOICE_COUNT];
+bool melosClusterEntry[MELOS_VOICE_COUNT];          // holding the new take's pitch
 float melosVoiceOffset[MELOS_VOICE_COUNT];        // current detune, semitones
 float melosVoiceOffsetTarget[MELOS_VOICE_COUNT];
 float melosVoiceJitter[MELOS_VOICE_COUNT];        // constant humanizing detune, cents

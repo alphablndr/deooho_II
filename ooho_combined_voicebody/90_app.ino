@@ -184,6 +184,14 @@ void printDiagnostics() {
   Serial.print(model.voicedRatio, 3);
   Serial.print(" / ");
   Serial.println(model.meanRms, 5);
+  Serial.print("  melos choir (");
+  Serial.print(melosArchivePitchCount);
+  Serial.print(" pitches): ");
+  for (uint8_t v = 0; v < (MELOS_CLUSTER && melosArchivePitchCount > 0 ? melosClusterVoices() : 0); ++v) {
+    Serial.print(exp2f(melosClusterLog[v]), 0);
+    Serial.print(melosClusterEntry[v] ? "* " : " ");
+  }
+  Serial.println("Hz");
   Serial.print("  melos pitch now / last voice: ");
   Serial.print(melosF0, 1);
   Serial.print(" / ");
@@ -466,6 +474,7 @@ void setup() {
   rngState ^= micros();
   rngState ^= static_cast<uint32_t>(analogRead(A0)) << 16;
   loadModel();
+  loadMelosPitches();
   initMelosSynth();
   nextIndex = loadCounter();
   loadGrainIndex();

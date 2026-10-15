@@ -303,6 +303,27 @@ void melosBlockUpdate() {
   spreadSemis *= (1.0f - melosLogosStabilize * 0.6f);          // clear words tighten unison
   spreadSemis = constrain(spreadSemis, 0.0f, MELOS_SPREAD_MAX_SEMITONES);
 
+  if (MELOS_CLUSTER && melosArchivePitchCount > 0) {
+    // Choir of the archive's real pitches: each voice glides between people.
+    const uint32_t now = millis();
+    for (uint8_t v = 0; v < MELOS_VOICE_COUNT; ++v) {
+      if (static_cast<int32_t>(now - melosClusterNextHopMs[v]) >= 0) {
+        melosClusterTarget[v] = melosClusterPick();
+        melosClusterEntry[v] = false;
+        melosClusterNextHopMs[v] = now + randomRangeMs(MELOS_CLUSTER_HOP_MIN_MS, MELOS_CLUSTER_HOP_MAX_MS);
+      }
+      const float ease = melosClusterEntry[v] ? MELOS_CLUSTER_ENTRY_EASE : MELOS_CLUSTER_GLIDE_EASE;
+      melosClusterLog[v] += (melosClusterTarget[v] - melosClusterLog[v]) * (ease * blk);
+      melosVoiceDrift[v] += nextRandomGaussian(0.0006f);
+      melosVoiceDrift[v] = constrain(melosVoiceDrift[v], -0.08f, 0.08f);
+      const float semis = melosVoiceJitter[v] * 0.01f + melosVoiceDrift[v];
+      const float vibPhase = (static_cast<float>(melosSampleCounter) / SAMPLE_RATE) * MELOS_VIBRATO_RATE_HZ +
+                             0.17f * static_cast<float>(v);
+      const float vibDepth = MELOS_VIBRATO_DEPTH * (0.55f + melosSpeechGhost * 0.85f + (melosClusterEntry[v] ? 0.35f : 0.0f));
+      melosVoiceF0[v] = constrain(exp2f(melosClusterLog[v]), F0_MIN_HZ * 0.5f, F0_MAX_HZ * 2.0f) *
+                        expf(semis * (0.6931472f / 12.0f)) * (1.0f + sineLookup(vibPhase) * vibDepth);
+    }
+  } else {
   static const float pattern[MELOS_VOICE_COUNT] = {-1.0f, -0.55f, -0.2f, 0.2f, 0.55f, 1.0f};
   for (uint8_t v = 0; v < MELOS_VOICE_COUNT; ++v) {
     float target = spreadSemis * pattern[v];
@@ -318,6 +339,7 @@ void melosBlockUpdate() {
     const float vibDepth = MELOS_VIBRATO_DEPTH * (0.55f + melosSpeechGhost * 0.85f + melosLearnAmount * 0.35f);
     melosVoiceF0[v] = melosF0 * expf(semis * (0.6931472f / 12.0f)) *
                       (1.0f + sineLookup(vibPhase) * vibDepth);
+  }
   }
 
   // Autonomous timbral movement (bounded, around archive-set centers).
@@ -473,10 +495,87 @@ void melosBlockUpdate() {
   melosLogosStabilize += (0.0f - melosLogosStabilize) * (MELOS_LOGOS_STABILIZE_DECAY * blk);
 }
 
+// ---------------- MELOS pitch cluster ----------------
+
+void clearMelosPitches() {
+  melosArchivePitchCount = 0;
+  melosArchivePitchWrite = 0;
+}
+
+static void rememberMelosPitch(float f0) {
+  melosArchivePitch[melosArchivePitchWrite] = f0;
+  melosArchivePitchWrite = (melosArchivePitchWrite + 1) % MELOS_PITCH_CAPACITY;
+  if (melosArchivePitchCount < MELOS_PITCH_CAPACITY) {
+    melosArchivePitchCount++;
+  }
+}
+
+void loadMelosPitches() {
+  clearMelosPitches();
+  FsFile file = SD.sdfs.open(PITCHES_FILE, O_RDONLY);
+  if (!file) {
+    return;
+  }
+  char line[24];
+  while (file.available()) {
+    if (readCsvLine(file, line, sizeof(line))) {
+      const float f0 = atof(line);
+      if (f0 >= F0_MIN_HZ && f0 <= F0_MAX_HZ) {
+        rememberMelosPitch(f0);
+      }
+    }
+  }
+  file.close();
+}
+
+// One voiced take = one person's pitch in the choir (whispers have none).
+void appendMelosPitch(float f0) {
+  if (!(f0 >= F0_MIN_HZ && f0 <= F0_MAX_HZ)) {
+    return;
+  }
+  rememberMelosPitch(f0);
+  FsFile file = SD.sdfs.open(PITCHES_FILE, O_WRITE | O_CREAT | O_APPEND);
+  if (file) {
+    file.println(f0, 1);
+    file.sync();
+    file.close();
+  }
+}
+
+uint8_t melosClusterVoices() {
+  return static_cast<uint8_t>(min(static_cast<uint16_t>(MELOS_VOICE_COUNT), max(static_cast<uint16_t>(1), melosArchivePitchCount)));
+}
+
+static float melosClusterPick() {
+  return log2f(melosArchivePitch[nextRandomU32() % melosArchivePitchCount]);
+}
+
+// A new take enters the choir: 2-3 voices jump to its pitch, hold, drift away.
+void melosClusterEnter(float f0) {
+  if (!MELOS_CLUSTER || !(f0 >= F0_MIN_HZ && f0 <= F0_MAX_HZ)) {
+    return;
+  }
+  const uint8_t n = melosClusterVoices();
+  const uint8_t joiners = min(n, static_cast<uint8_t>(2 + nextRandomU32() % 2UL));
+  const uint8_t first = nextRandomU32() % n;
+  for (uint8_t k = 0; k < joiners; ++k) {
+    const uint8_t v = (first + k) % n;
+    melosClusterTarget[v] = log2f(f0);
+    melosClusterEntry[v] = true;
+    melosClusterNextHopMs[v] = millis() + randomRangeMs(MELOS_CLUSTER_ENTRY_MIN_MS, MELOS_CLUSTER_ENTRY_MAX_MS);
+  }
+}
+
 void initMelosSynth() {
   melosEnvPhase = 0.0f;
   melosSampleCounter = 0;
   melosF0 = constrain(expf(model.meanLogF0), F0_MIN_HZ, F0_MAX_HZ);
+  for (uint8_t v = 0; v < MELOS_VOICE_COUNT; ++v) {
+    melosClusterLog[v] = melosArchivePitchCount > 0 ? melosClusterPick() : log2f(melosF0);
+    melosClusterTarget[v] = melosClusterLog[v];
+    melosClusterEntry[v] = false;
+    melosClusterNextHopMs[v] = millis() + randomRangeMs(MELOS_CLUSTER_HOP_MIN_MS / 2, MELOS_CLUSTER_HOP_MAX_MS);
+  }
   melosVoicedRatio = model.voicedRatio;
   melosTenseness = constrain(model.voicedRatio, 0.1f, 0.95f);
   melosAspiration = 0.2f;
@@ -579,7 +678,8 @@ float melosNextSample() {
   float source = 0.0f;
   float noiseMod = 0.0f;
   float weightSum = 0.0f;
-  const uint8_t audibleVoices = 1 + MELOS_SHADOW_COUNT;
+  const bool cluster = MELOS_CLUSTER && melosArchivePitchCount > 0;
+  const uint8_t audibleVoices = cluster ? melosClusterVoices() : 1 + MELOS_SHADOW_COUNT;
   for (uint8_t v = 0; v < audibleVoices && v < MELOS_VOICE_COUNT; ++v) {
     const float vf0 = melosVoiceF0[v];
     melosVoicePhase[v] += vf0 / SAMPLE_RATE;
@@ -590,14 +690,17 @@ float melosNextSample() {
     const float lf = melosLfWaveform(melosVoicePhase[v]);
     const float edge = sineLookup(melosVoicePhase[v] * 2.0f) * (0.55f + tenseV * 0.45f) +
                        sineLookup(melosVoicePhase[v] * 3.0f) * 0.38f;
-    const float weight = v == 0 ? MELOS_LEAD_SOURCE_GAIN : (MELOS_SHADOW_SOURCE_GAIN / static_cast<float>(MELOS_SHADOW_COUNT));
+    const float weight = cluster ? 1.0f
+                         : (v == 0 ? MELOS_LEAD_SOURCE_GAIN : (MELOS_SHADOW_SOURCE_GAIN / static_cast<float>(MELOS_SHADOW_COUNT)));
     source += (lf * (MELOS_LF_TONE_GAIN * (0.78f + tenseV * 0.22f)) +
                edge * (MELOS_LF_BRIGHT_GAIN * tenseV)) * weight;
     noiseMod += melosGlottalNoiseModulator(melosVoicePhase[v]) * weight;
     weightSum += weight;
   }
   if (weightSum > 0.0f) {
-    source /= weightSum;
+    // A choir of unrelated pitches adds up like noise: keep its loudness by
+    // dividing by sqrt(n) instead of n.
+    source /= cluster ? sqrtf(weightSum) : weightSum;
     noiseMod /= weightSum;
   }
 

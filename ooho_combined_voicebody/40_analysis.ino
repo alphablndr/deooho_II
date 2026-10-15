@@ -395,6 +395,8 @@ void updateCollectiveModel() {
   for (uint8_t i = 0; i < BAND_COUNT; ++i) {
     model.bands[i] = model.bands[i] * (1.0f - MODEL_WEIGHT) + incomingBands[i] * MODEL_WEIGHT;
   }
+  appendMelosPitch(medianF0);   // this person's note joins the MELOS choir
+  melosClusterEnter(medianF0);
   triggerMelosLearnedGesture(medianF0, incomingVoicedRatio, incomingBands);
 
   Serial.print("Model update: voices=");
@@ -454,6 +456,10 @@ void rebuildGrainsFromArchive() {
     SD.remove(GRAINS_FILE);
   }
   clearGrainIndex();  // appendGrain() refills it file by file
+  if (SD.exists(PITCHES_FILE)) {
+    SD.remove(PITCHES_FILE);
+  }
+  clearMelosPitches();
   grainCount = 0;
 
   uint32_t filesDone = 0;
@@ -474,6 +480,8 @@ void rebuildGrainsFromArchive() {
     strncpy(currentFilename, name, sizeof(currentFilename));
     currentFilename[sizeof(currentFilename) - 1] = '\0';
     appendLogosGrains();  // appends grains for this file to GRAINS.CSV
+    float voicedRatio = 0.0f;
+    appendMelosPitch(estimateMedianF0(voicedRatio));  // and its pitch to the MELOS choir
     filesDone++;
     workTick();
   }
