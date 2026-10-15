@@ -133,12 +133,12 @@ constexpr uint32_t MELOS_MURMUR_MAX_MS = 45000;
 
 constexpr uint8_t LOGOS_STREAM_COUNT = 4;
 // Short storm after every take (from the ooho_voices experiment, Anton
-// 2026-10-15): for ~5 s every new LOGOS grain is a short fragment on a fast
+// 2026-10-15): for ~10 s every new LOGOS grain is a short fragment on a fast
 // pulse, 40 % of them from the new take, original speed; then the usual
 // LOGOS takes over. Streams in the storm by archive size: <10 takes 1,
 // <30 2, <80 3, otherwise 4.
-constexpr uint32_t LOGOS_STORM_MIN_MS = 4000;
-constexpr uint32_t LOGOS_STORM_MAX_MS = 6000;
+constexpr uint32_t LOGOS_STORM_MIN_MS = 9000;   // Anton: 10 s
+constexpr uint32_t LOGOS_STORM_MAX_MS = 11000;
 constexpr uint32_t LOGOS_STORM_MIN_INTERVAL_MS = 110;
 constexpr uint32_t LOGOS_STORM_MAX_INTERVAL_MS = 220;
 constexpr uint8_t LOGOS_STORM_NEW_TAKE_PERCENT = 40;
