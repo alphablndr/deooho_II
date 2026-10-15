@@ -624,7 +624,7 @@ static float melosClusterPick() {
 // Register centre of voice v (log2 Hz): a stack of fifths from E2. With few
 // voices the middle registers are used.
 static float melosRegisterCentre(uint8_t v) {
-  static const float centreHz[MELOS_VOICE_COUNT] = {82.4f, 123.5f, 185.0f, 277.2f, 415.3f, 622.3f};
+  static const float centreHz[MELOS_VOICE_COUNT] = {98.0f, 130.8f, 174.6f, 233.1f, 311.1f, 415.3f};  // G2 C3 F3 Bb3 Eb4 Ab4
   static const uint8_t layout[MELOS_VOICE_COUNT][MELOS_VOICE_COUNT] = {
       {2, 0, 0, 0, 0, 0}, {1, 3, 0, 0, 0, 0}, {1, 2, 4, 0, 0, 0},
       {0, 2, 3, 4, 0, 0}, {0, 1, 2, 3, 4, 0}, {0, 1, 2, 3, 4, 5}};
@@ -646,7 +646,7 @@ float melosJustTune(float logPitch, uint8_t v) {
   if (!MELOS_JUST_TUNING || v == 0) {
     return logPitch;
   }
-  static const float justCents[] = {0.0f, 203.9f, 315.6f, 386.3f, 498.0f, 702.0f, 813.7f, 884.4f, 1017.6f, 1088.3f, 1200.0f};
+  static const float justCents[] = {0.0f, 315.6f, 386.3f, 498.0f, 702.0f, 813.7f, 884.4f, 1200.0f};  // consonances
   const float above = (logPitch - melosClusterLog[0]) * 1200.0f;
   const float inOctave = above - 1200.0f * floorf(above / 1200.0f);
   float nearest = 0.0f;
@@ -659,14 +659,29 @@ float melosJustTune(float logPitch, uint8_t v) {
   return logPitch + pull / 1200.0f;
 }
 
+// How rough a note sounds over the bass (interval class, 0 smooth .. 1 rough).
+static float melosRoughness(float logPitch) {
+  static const float rough[12] = {0.0f, 1.0f, 0.7f, 0.35f, 0.3f, 0.2f, 0.8f, 0.1f, 0.3f, 0.35f, 0.6f, 0.9f};
+  const int semis = static_cast<int>(roundf((logPitch - melosClusterLog[0]) * 12.0f));
+  return rough[((semis % 12) + 12) % 12];
+}
+
 // The next note of voice v: a person of the archive, placed in this voice's
-// register; VOICE_LEADING prefers the nearest of a few candidates.
+// register. VOICE_LEADING chooses WHO sings next - of a few candidates the one
+// whose note is near and sits well over the bass - never changing a note.
 float melosNextNote(uint8_t v) {
   float best = melosPlaceInRegister(melosClusterPick(), v);
   if (MELOS_VOICE_LEADING && (nextRandomU32() % 100UL) < MELOS_LEADING_STEP_PERCENT) {
+    auto score = [&](float note) {
+      const float step = fabsf(note - melosClusterLog[v]);  // octaves
+      return step + (v > 0 ? MELOS_LEADING_CONSONANCE * melosRoughness(note) : 0.0f);
+    };
+    float bestScore = score(best);
     for (uint8_t k = 1; k < MELOS_LEADING_CANDIDATES; ++k) {
       const float candidate = melosPlaceInRegister(melosClusterPick(), v);
-      if (fabsf(candidate - melosClusterLog[v]) < fabsf(best - melosClusterLog[v])) {
+      const float s = score(candidate);
+      if (s < bestScore) {
+        bestScore = s;
         best = candidate;
       }
     }

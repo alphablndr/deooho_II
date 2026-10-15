@@ -87,20 +87,23 @@ constexpr uint32_t MELOS_NOTE_BREATH_MAX_MS = 1500;
 // by one: quick fade out, re-enter on the new note), then leave one by one.
 constexpr uint32_t MELOS_GATHER_START_MAX_MS = 4000;
 // Musical moves on the choir (Anton 2026-10-15), each switchable:
-// VOICING - every voice has a register (a stack of fifths from E2) and a
-//   person's note is moved by whole octaves into it: still their note, but an
-//   open chord instead of a cluster around 110 Hz. Few voices use the middle.
+// VOICING - every voice has a register (a stack of fourths from G2, 98-415
+//   Hz) and a person's note is moved by whole octaves into it: still their
+//   note, but an open chord instead of a cluster around 110 Hz. Few voices
+//   use the middle registers.
 // JUST_TUNING - entering a note, a voice leans at most 40 cents toward the
-//   nearest just interval above the bass voice: the choir listens to itself.
-// VOICE_LEADING - a voice usually (70 %) moves to the nearest of 4 candidate
-//   people's notes, otherwise leaps: chords change by steps.
+//   nearest consonant just interval above the bass: the choir listens to itself.
+// VOICE_LEADING - choosing who sings next: of 5 candidate people the voice
+//   (75 %) takes the one whose note is nearest and sounds best with the bass
+//   (people's notes are never changed for this), otherwise someone at random.
 constexpr bool MELOS_VOICING = true;
 constexpr bool MELOS_JUST_TUNING = true;
 constexpr bool MELOS_VOICE_LEADING = true;
 constexpr float MELOS_JUST_PULL = 0.6f;
 constexpr float MELOS_JUST_MAX_CENTS = 40.0f;
-constexpr uint8_t MELOS_LEADING_CANDIDATES = 4;
-constexpr uint8_t MELOS_LEADING_STEP_PERCENT = 70;
+constexpr uint8_t MELOS_LEADING_CANDIDATES = 5;
+constexpr uint8_t MELOS_LEADING_STEP_PERCENT = 75;
+constexpr float MELOS_LEADING_CONSONANCE = 1.0f;   // weight of the bass interval vs step size
 constexpr float MELOS_GATHER_FADE_S = 1.8f;
 constexpr uint32_t MELOS_CLUSTER_GATHER_MS = 10000;
 constexpr uint32_t MELOS_CLUSTER_DISPERSE_MIN_MS = 2000;
