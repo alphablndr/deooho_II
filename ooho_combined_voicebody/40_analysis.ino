@@ -216,67 +216,85 @@ int compareFloats(const void *a, const void *b) {
   return (fa > fb) - (fa < fb);
 }
 
+// Median pitch of a take, or 0 when it has none (whisper, silence, noise).
+// Checked against a YIN reference on 14 bench takes (2026-10-15): the old
+// version gave notes to whispers, silence and a covered mic (mostly 355.6 Hz,
+// the edge of the lag range). Now: decimation averages 4 samples (no hiss
+// aliasing), a frame must be 3x louder than the take's own background, the
+// match must be confident (0.5) and not at the range edge, and a take needs
+// at least 5 such frames. voicedRatio keeps its old meaning (loud frames).
 float estimateMedianF0(float &voicedRatio) {
+  static float frame[F0_FRAME_SAMPLES];
+  static float frameRms[MAX_F0_FRAMES];
+  static float rmsSorted[MAX_F0_FRAMES];
   const int16_t *source = reinterpret_cast<const int16_t *>(activeRecordBuffer);
-  const uint32_t sourceSamples = recordBytesUsed / 2;
-  const uint32_t decimatedSamples = sourceSamples / 4;
+  const uint32_t decimatedSamples = (recordBytesUsed / 2) / 4;
+  voicedRatio = 0.0f;
   if (decimatedSamples < F0_FRAME_SAMPLES) {
-    voicedRatio = 0.0f;
     return 0.0f;
   }
 
+  auto loadFrame = [&](uint32_t frameStart) {
+    for (uint16_t i = 0; i < F0_FRAME_SAMPLES; ++i) {
+      const int16_t *p = source + (frameStart + i) * 4;
+      frame[i] = (p[0] + p[1] + p[2] + p[3]) * (1.0f / 131072.0f);
+    }
+  };
+
+  // Pass 1: loudness of every frame -> this take's background.
+  uint32_t frames = 0, loudFrames = 0;
+  for (uint32_t st = 0; st + F0_FRAME_SAMPLES <= decimatedSamples && frames < MAX_F0_FRAMES; st += F0_HOP_SAMPLES) {
+    loadFrame(st);
+    float energy = 0.0f;
+    for (uint16_t i = 0; i < F0_FRAME_SAMPLES; ++i) {
+      energy += frame[i] * frame[i];
+    }
+    frameRms[frames] = sqrtf(energy / F0_FRAME_SAMPLES);
+    rmsSorted[frames] = frameRms[frames];
+    loudFrames += frameRms[frames] >= F0_RMS_THRESHOLD ? 1 : 0;
+    ++frames;
+    if ((frames & 0x1FUL) == 0) {
+      workTick();
+    }
+  }
+  voicedRatio = frames > 0 ? static_cast<float>(loudFrames) / frames : 0.0f;
+  std::nth_element(rmsSorted, rmsSorted + frames / 10, rmsSorted + frames);
+  const float gate = max(rmsSorted[frames / 10] * F0_GATE_OVER_BACKGROUND, F0_GATE_MIN);
+
+  // Pass 2: pitch of the frames clearly above the background.
   float acceptedF0[MAX_F0_VALUES];
   uint16_t acceptedCount = 0;
-  uint32_t totalFrames = 0;
-  uint32_t voicedFrames = 0;
-
-  for (uint32_t frameStart = 0; frameStart + F0_FRAME_SAMPLES <= decimatedSamples; frameStart += F0_HOP_SAMPLES) {
-    totalFrames++;
-
-    double energy = 0.0;
-    for (uint16_t i = 0; i < F0_FRAME_SAMPLES; ++i) {
-      const float s = source[(frameStart + i) * 4] / 32768.0f;
-      energy += static_cast<double>(s) * s;
-    }
-    const float rms = sqrtf(energy / F0_FRAME_SAMPLES);
-    if (rms < F0_RMS_THRESHOLD) {
+  for (uint32_t f = 0; f < frames && acceptedCount < MAX_F0_VALUES; ++f) {
+    if (frameRms[f] < gate) {
       continue;
     }
-    voicedFrames++;
-
+    loadFrame(f * F0_HOP_SAMPLES);
     float bestCorr = 0.0f;
     uint16_t bestLag = F0_MIN_LAG;
     for (uint16_t lag = F0_MIN_LAG; lag <= F0_MAX_LAG; ++lag) {
-      double cross = 0.0;
-      double e1 = 0.0;
-      double e2 = 0.0;
+      float cross = 0.0f, e1 = 0.0f, e2 = 0.0f;
       const uint16_t count = F0_FRAME_SAMPLES - lag;
       for (uint16_t i = 0; i < count; ++i) {
-        const float a = source[(frameStart + i) * 4] / 32768.0f;
-        const float b = source[(frameStart + i + lag) * 4] / 32768.0f;
-        cross += static_cast<double>(a) * b;
-        e1 += static_cast<double>(a) * a;
-        e2 += static_cast<double>(b) * b;
+        const float a = frame[i];
+        const float b = frame[i + lag];
+        cross += a * b;
+        e1 += a * a;
+        e2 += b * b;
       }
-      const float denom = sqrtf(e1 * e2) + 1.0e-9f;
-      const float corr = cross / denom;
+      const float corr = cross / (sqrtf(e1 * e2) + 1.0e-9f);
       if (corr > bestCorr) {
         bestCorr = corr;
         bestLag = lag;
       }
     }
-
-    if (bestCorr > F0_CONFIDENCE_THRESHOLD && acceptedCount < MAX_F0_VALUES) {
+    if (bestCorr > F0_CONFIDENCE_THRESHOLD && bestLag > F0_MIN_LAG && bestLag < F0_MAX_LAG) {
       acceptedF0[acceptedCount++] = static_cast<float>(ANALYSIS_RATE) / bestLag;
     }
     workTick();
   }
-
-  voicedRatio = totalFrames > 0 ? static_cast<float>(voicedFrames) / totalFrames : 0.0f;
-  if (acceptedCount == 0) {
+  if (acceptedCount < F0_MIN_VOICED_FRAMES) {
     return 0.0f;
   }
-
   qsort(acceptedF0, acceptedCount, sizeof(float), compareFloats);
   return acceptedF0[acceptedCount / 2];
 }
@@ -481,7 +499,11 @@ void rebuildGrainsFromArchive() {
     currentFilename[sizeof(currentFilename) - 1] = '\0';
     appendLogosGrains();  // appends grains for this file to GRAINS.CSV
     float voicedRatio = 0.0f;
-    appendMelosPitch(estimateMedianF0(voicedRatio));  // and its pitch to the MELOS choir
+    const float pitch = estimateMedianF0(voicedRatio);
+    appendMelosPitch(pitch);  // and its pitch to the MELOS choir
+    Serial.print(name);
+    Serial.print(" pitch ");
+    Serial.println(pitch, 1);
     filesDone++;
     workTick();
   }
