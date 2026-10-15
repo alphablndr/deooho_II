@@ -69,15 +69,18 @@ constexpr uint8_t MELOS_VOICE_COUNT = 6;
 // Pitch cluster (Anton 2026-10-15): instead of one average pitch, the MELOS
 // voices sing the real pitches of the people in the archive (PITCHES.CSV, one
 // per voiced take). Each voice glides (~8 s) from one person's pitch to
-// another's every 25-60 s; a new take enters the choir: 2-3 voices jump to its pitch in
-// unison and drift apart again after 30-60 s. Voices = takes, up to 6.
+// another's every 25-60 s; a new take gathers every voice on its pitch and
+// vowel over ~10 s, then they drift apart. Voices = takes, up to 6.
 // false = the previous single-centre MELOS, unchanged.
 constexpr bool MELOS_CLUSTER = true;
 constexpr uint16_t MELOS_PITCH_CAPACITY = 1024;
 constexpr uint32_t MELOS_CLUSTER_HOP_MIN_MS = 25000;   // Anton: slower movement
 constexpr uint32_t MELOS_CLUSTER_HOP_MAX_MS = 60000;
-constexpr uint32_t MELOS_CLUSTER_ENTRY_MIN_MS = 30000;
-constexpr uint32_t MELOS_CLUSTER_ENTRY_MAX_MS = 60000;
+// Anton: on a take ALL voices gather on its note and vowel over ~10 s, then
+// drift apart one by one over the next 2-8 s.
+constexpr uint32_t MELOS_CLUSTER_GATHER_MS = 10000;
+constexpr uint32_t MELOS_CLUSTER_DISPERSE_MIN_MS = 2000;
+constexpr uint32_t MELOS_CLUSTER_DISPERSE_MAX_MS = 8000;
 // Each choir voice has its own mouth (Pink Trombone logic). Its vowel keeps
 // morphing slowly (Anton: never constant, but slow): a sweep of its own
 // (60-150 s period) around a centre that moves every 45-120 s, plus a small
@@ -140,7 +143,7 @@ constexpr uint32_t MELOS_LEARN_HOLD_MS = 7000;
 constexpr uint32_t MELOS_LEARN_RETURN_MS = 40000;
 constexpr float MELOS_LEARN_GLIDE_EASE = 1.0f / (1.0f * SAMPLE_RATE);  // ~1 s pitch glide
 constexpr float MELOS_CLUSTER_GLIDE_EASE = 1.0f / (8.0f * SAMPLE_RATE);  // voice moves to another person
-constexpr float MELOS_CLUSTER_ENTRY_EASE = 1.0f / (0.8f * SAMPLE_RATE);  // the new voice arrives fast
+constexpr float MELOS_CLUSTER_ENTRY_EASE = 1.0f / (3.3f * SAMPLE_RATE);  // ~95 % of the way in 10 s
 constexpr float MELOS_TONGUE_EASE = 1.0f / (2.6f * SAMPLE_RATE);
 constexpr float MELOS_TONGUE_DIAMETER_EASE = 1.0f / (1.8f * SAMPLE_RATE);
 constexpr float MELOS_ARTICULATION_DECAY = 1.0f / (1.7f * SAMPLE_RATE);

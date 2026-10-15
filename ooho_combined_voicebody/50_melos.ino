@@ -601,21 +601,18 @@ void melosVoiceFormantCoeffs(uint8_t v) {
   }
 }
 
-// A new take enters the choir: 2-3 voices jump to its pitch and its vowel,
-// hold, drift away.
+// A new take enters the choir: every voice gathers on its pitch and vowel
+// over ~10 s, then they drift apart one by one.
 void melosClusterEnter(float f0, float vowelPos) {
   if (!MELOS_CLUSTER || !(f0 >= F0_MIN_HZ && f0 <= F0_MAX_HZ)) {
     return;
   }
   melosEntryVowel = vowelPos;
-  const uint8_t n = melosClusterVoices();
-  const uint8_t joiners = min(n, static_cast<uint8_t>(2 + nextRandomU32() % 2UL));
-  const uint8_t first = nextRandomU32() % n;
-  for (uint8_t k = 0; k < joiners; ++k) {
-    const uint8_t v = (first + k) % n;
+  for (uint8_t v = 0; v < MELOS_VOICE_COUNT; ++v) {
     melosClusterTarget[v] = log2f(f0);
     melosClusterEntry[v] = true;
-    melosClusterNextHopMs[v] = millis() + randomRangeMs(MELOS_CLUSTER_ENTRY_MIN_MS, MELOS_CLUSTER_ENTRY_MAX_MS);
+    melosClusterNextHopMs[v] = millis() + MELOS_CLUSTER_GATHER_MS +
+                               randomRangeMs(MELOS_CLUSTER_DISPERSE_MIN_MS, MELOS_CLUSTER_DISPERSE_MAX_MS);
   }
 }
 
