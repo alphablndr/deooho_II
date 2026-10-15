@@ -427,17 +427,30 @@ void setup() {
   // LOGOS -> internal speaker: clear low mud, lift presence for word clarity.
   // Voice band (Anton 2026-10-15): from 70 Hz (keeps low fundamentals) to
   // 12 kHz (above it there is only hiss).
+  // Mastering from an output recording (2026-10-15): LOGOS sat ~12 dB under
+  // MELOS (active median -43 dBFS) with a 15 dB spread between fragments and
+  // its loudest octave at 63-125 Hz. +8 dB in, -3 dB shelf below 150 Hz for
+  // clarity (fundamentals kept), gentle 2.5:1 compressor, +3 dB makeup.
+  masterL.inputGain = 2.5f;
   masterL.stage[0].setHighpass(70.0f, 0.707f);
-  masterL.stage[1].setPeaking(3000.0f, 1.0f, 2.5f);
-  masterL.stage[2].setLowpass(12000.0f, 0.707f);
-  masterL.stages = 3;
+  masterL.stage[1].setLowShelf(150.0f, -3.0f);
+  masterL.stage[2].setPeaking(3000.0f, 1.0f, 2.5f);
+  masterL.stage[3].setLowpass(12000.0f, 0.707f);
+  masterL.stages = 4;
+  masterL.compOn = true;
+  masterL.compThreshold = 0.1f;   // -20 dBFS
+  masterL.compRatio = 2.5f;
+  masterL.compMakeup = 1.41f;     // +3 dB
   masterL.ceiling = 0.92f;
   // MELOS -> 31 cm / 1.5 mm steel cube exciter. The metallic ring is WANTED
   // (the cube is the instrument), so we do NOT tame 2-6 kHz. Only a protective
   // high-pass below the panel fundamental (~130-180 Hz, where it can't radiate
   // anyway) + the limiter to keep the driver safe. Let the steel sing.
   masterR.stage[0].setHighpass(150.0f, 0.707f);
-  masterR.stages = 1;
+  // Mastering (2026-10-15): MELOS was all 125-500 Hz (2-4 kHz at -27 dB), dark
+  // on the steel. +5 dB around 2 kHz lets the choir's vowels read on the cube.
+  masterR.stage[1].setPeaking(2000.0f, 0.7f, 5.0f);
+  masterR.stages = 2;
   masterR.ceiling = 0.90f;
 
   if (USE_MAX4466_LINEIN) {

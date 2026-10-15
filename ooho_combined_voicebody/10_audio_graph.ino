@@ -30,6 +30,18 @@ struct MasterBiquad {
     a1 = (-2.0f * c) / a0;
     a2 = (1.0f - alpha) / a0;
   }
+  void setLowShelf(float fc, float dB) {  // RBJ cookbook, shelf slope 1
+    const float A = powf(10.0f, dB / 40.0f);
+    const float w0 = 2.0f * PI * fc / SAMPLE_RATE;
+    const float c = cosf(w0), s = sinf(w0);
+    const float alpha2 = 2.0f * sqrtf(A) * (s * 0.5f * sqrtf(2.0f));
+    const float a0 = (A + 1.0f) + (A - 1.0f) * c + alpha2;
+    b0 = A * ((A + 1.0f) - (A - 1.0f) * c + alpha2) / a0;
+    b1 = 2.0f * A * ((A - 1.0f) - (A + 1.0f) * c) / a0;
+    b2 = A * ((A + 1.0f) - (A - 1.0f) * c - alpha2) / a0;
+    a1 = -2.0f * ((A - 1.0f) + (A + 1.0f) * c) / a0;
+    a2 = ((A + 1.0f) + (A - 1.0f) * c - alpha2) / a0;
+  }
   void setPeaking(float fc, float q, float dB) {
     const float A = powf(10.0f, dB / 40.0f);
     const float w0 = 2.0f * PI * fc / SAMPLE_RATE;
@@ -47,9 +59,18 @@ struct MasterBiquad {
 class AudioMaster : public AudioStream {
 public:
   AudioMaster() : AudioStream(1, inputQueueArray) {}
-  MasterBiquad stage[3];
+  MasterBiquad stage[4];
   uint8_t stages = 0;
   float ceiling = 0.9f;
+  float inputGain = 1.0f;        // mastering: level into the chain
+  // Gentle compressor between EQ and limiter (off unless configured):
+  // peak follower 10 ms attack / 300 ms release, smooth gain.
+  bool compOn = false;
+  float compThreshold = 0.1f;    // linear
+  float compRatio = 2.5f;
+  float compMakeup = 1.0f;
+  float compEnv = 0.0f;
+  float compGain = 1.0f;
   float limEnv = 0.0f;
   float limGain = 1.0f;
   // Output fade, set from loop() via fadeTo(). Applied per sample at the very
@@ -70,9 +91,16 @@ public:
     const float target = levelTarget;
     const float step = levelStep;
     for (int i = 0; i < AUDIO_BLOCK_SAMPLES; ++i) {
-      float x = block->data[i] * (1.0f / 32768.0f);
+      float x = block->data[i] * (1.0f / 32768.0f) * inputGain;
       for (uint8_t s = 0; s < stages; ++s) {
         x = stage[s].process(x);
+      }
+      if (compOn) {
+        const float a = fabsf(x);
+        compEnv += (a - compEnv) * (a > compEnv ? 0.00227f : 0.0000756f);
+        const float g = compEnv > compThreshold ? powf(compEnv / compThreshold, 1.0f / compRatio - 1.0f) : 1.0f;
+        compGain += (g - compGain) * 0.01f;
+        x *= compGain * compMakeup;
       }
       // Soft limiter: peak-follow gain reduction, fast attack / slow release.
       const float a = fabsf(x);
