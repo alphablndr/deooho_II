@@ -101,6 +101,7 @@ constexpr bool MELOS_JUST_TUNING = true;
 constexpr bool MELOS_VOICE_LEADING = true;
 constexpr float MELOS_JUST_PULL = 0.6f;
 constexpr float MELOS_JUST_MAX_CENTS = 40.0f;
+constexpr float MELOS_UNISON_SNAP_CENTS = 70.0f;  // near-unison/octave notes of two people sing it clean
 constexpr uint8_t MELOS_LEADING_CANDIDATES = 5;
 constexpr uint8_t MELOS_LEADING_STEP_PERCENT = 75;
 constexpr float MELOS_LEADING_CONSONANCE = 1.0f;   // weight of the bass interval vs step size

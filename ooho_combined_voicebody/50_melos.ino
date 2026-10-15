@@ -655,6 +655,11 @@ float melosJustTune(float logPitch, uint8_t v) {
       nearest = j;
     }
   }
+  // Two people a little apart on "the same note" sing it as one: a near
+  // unison/octave snaps clean (sour octaves were heard on the bench).
+  if ((nearest == 0.0f || nearest == 1200.0f) && fabsf(nearest - inOctave) <= MELOS_UNISON_SNAP_CENTS) {
+    return logPitch + (nearest - inOctave) / 1200.0f;
+  }
   const float pull = constrain((nearest - inOctave) * MELOS_JUST_PULL, -MELOS_JUST_MAX_CENTS, MELOS_JUST_MAX_CENTS);
   return logPitch + pull / 1200.0f;
 }
