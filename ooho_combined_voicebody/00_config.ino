@@ -68,30 +68,31 @@ constexpr uint16_t MELOS_SINE_SIZE = 2048;
 constexpr uint8_t MELOS_VOICE_COUNT = 6;
 // Pitch cluster (Anton 2026-10-15): instead of one average pitch, the MELOS
 // voices sing the real pitches of the people in the archive (PITCHES.CSV, one
-// per voiced take). Each voice glides from one person's pitch to another's
-// every 10-30 s; a new take enters the choir: 2-3 voices jump to its pitch in
+// per voiced take). Each voice glides (~8 s) from one person's pitch to
+// another's every 25-60 s; a new take enters the choir: 2-3 voices jump to its pitch in
 // unison and drift apart again after 30-60 s. Voices = takes, up to 6.
 // false = the previous single-centre MELOS, unchanged.
 constexpr bool MELOS_CLUSTER = true;
 constexpr uint16_t MELOS_PITCH_CAPACITY = 1024;
-constexpr uint32_t MELOS_CLUSTER_HOP_MIN_MS = 10000;
-constexpr uint32_t MELOS_CLUSTER_HOP_MAX_MS = 30000;
+constexpr uint32_t MELOS_CLUSTER_HOP_MIN_MS = 25000;   // Anton: slower movement
+constexpr uint32_t MELOS_CLUSTER_HOP_MAX_MS = 60000;
 constexpr uint32_t MELOS_CLUSTER_ENTRY_MIN_MS = 30000;
 constexpr uint32_t MELOS_CLUSTER_ENTRY_MAX_MS = 60000;
 // Each choir voice has its own mouth (Pink Trombone logic). Its vowel keeps
 // morphing slowly (Anton: never constant, but slow): a sweep of its own
-// (30-80 s period) around a centre that moves every 20-60 s, plus a small
-// random walk, each change gliding over ~6 s. MELOS is tone only (Anton: no
+// (60-150 s period) around a centre that moves every 45-120 s, plus a small
+// random walk, each change gliding over ~10 s. MELOS is tone only (Anton: no
 // whispering voices, less hiss). Nasality, speech-ghost and constrictions
 // stay shared: the cube's one body moving.
-constexpr uint32_t MELOS_VOWEL_HOP_MIN_MS = 20000;
-constexpr uint32_t MELOS_VOWEL_HOP_MAX_MS = 60000;
+constexpr uint32_t MELOS_VOWEL_HOP_MIN_MS = 45000;
+constexpr uint32_t MELOS_VOWEL_HOP_MAX_MS = 120000;
 constexpr float MELOS_VOICE_VOWEL_WANDER = 0.12f;
 constexpr float MELOS_VOWEL_SWEEP = 0.22f;            // depth of each voice's own vowel sweep
-constexpr float MELOS_VOWEL_SWEEP_MIN_S = 30.0f;
-constexpr float MELOS_VOWEL_SWEEP_MAX_S = 80.0f;
-constexpr float MELOS_VOICE_VOWEL_EASE = 1.0f / (6.0f * SAMPLE_RATE);
+constexpr float MELOS_VOWEL_SWEEP_MIN_S = 60.0f;
+constexpr float MELOS_VOWEL_SWEEP_MAX_S = 150.0f;
+constexpr float MELOS_VOICE_VOWEL_EASE = 1.0f / (10.0f * SAMPLE_RATE);
 constexpr float MELOS_VOICE_BREATH = 0.03f;           // a trace of air, no whisper
+constexpr float MELOS_CLUSTER_ASPIRATION = 0.35f;     // Anton: less hiss (about -9 dB)
 constexpr uint8_t MELOS_TRACT_SECTIONS = 3;
 
 // MELOS collective vocal body (variant A): source-formant-filter engine.
@@ -138,7 +139,7 @@ constexpr float MELOS_LEARN_PULL = 0.85f;
 constexpr uint32_t MELOS_LEARN_HOLD_MS = 7000;
 constexpr uint32_t MELOS_LEARN_RETURN_MS = 40000;
 constexpr float MELOS_LEARN_GLIDE_EASE = 1.0f / (1.0f * SAMPLE_RATE);  // ~1 s pitch glide
-constexpr float MELOS_CLUSTER_GLIDE_EASE = 1.0f / (4.0f * SAMPLE_RATE);  // voice moves to another person
+constexpr float MELOS_CLUSTER_GLIDE_EASE = 1.0f / (8.0f * SAMPLE_RATE);  // voice moves to another person
 constexpr float MELOS_CLUSTER_ENTRY_EASE = 1.0f / (0.8f * SAMPLE_RATE);  // the new voice arrives fast
 constexpr float MELOS_TONGUE_EASE = 1.0f / (2.6f * SAMPLE_RATE);
 constexpr float MELOS_TONGUE_DIAMETER_EASE = 1.0f / (1.8f * SAMPLE_RATE);

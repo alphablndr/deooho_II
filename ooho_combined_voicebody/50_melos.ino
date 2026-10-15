@@ -768,7 +768,7 @@ float melosNextSample() {
       const float src = lf * (MELOS_LF_TONE_GAIN * (0.78f + tenseV * 0.22f)) + edge * (MELOS_LF_BRIGHT_GAIN * tenseV);
       const float breath = melosVoiceBreath[v];
       const float excV = src * melosTenseness * (1.0f - 0.85f * breath) +
-                         nextRandomBipolar() * (melosAspiration * MELOS_LF_ASPIRATION_GAIN *
+                         nextRandomBipolar() * (melosAspiration * MELOS_LF_ASPIRATION_GAIN * MELOS_CLUSTER_ASPIRATION *
                                                     melosGlottalNoiseModulator(melosVoicePhase[v]) +
                                                 breath * 0.5f) +
                          fricativeNoise;
