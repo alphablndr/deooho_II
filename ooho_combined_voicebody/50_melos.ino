@@ -314,7 +314,7 @@ void melosBlockUpdate() {
       switch (melosVoiceStage[v]) {
         case 0:  // singing
           if (static_cast<int32_t>(now - melosClusterNextHopMs[v]) >= 0) {
-            melosClusterTarget[v] = melosClusterPick();
+            melosClusterTarget[v] = melosNextNote(v);
             melosClusterTargetEntry[v] = false;
             melosVoiceFadeStep[v] = blk / (randomFade * SAMPLE_RATE);
             melosVoiceStage[v] = 1;
@@ -621,6 +621,59 @@ static float melosClusterPick() {
   return log2f(melosArchivePitch[nextRandomU32() % melosArchivePitchCount]);
 }
 
+// Register centre of voice v (log2 Hz): a stack of fifths from E2. With few
+// voices the middle registers are used.
+static float melosRegisterCentre(uint8_t v) {
+  static const float centreHz[MELOS_VOICE_COUNT] = {82.4f, 123.5f, 185.0f, 277.2f, 415.3f, 622.3f};
+  static const uint8_t layout[MELOS_VOICE_COUNT][MELOS_VOICE_COUNT] = {
+      {2, 0, 0, 0, 0, 0}, {1, 3, 0, 0, 0, 0}, {1, 2, 4, 0, 0, 0},
+      {0, 2, 3, 4, 0, 0}, {0, 1, 2, 3, 4, 0}, {0, 1, 2, 3, 4, 5}};
+  const uint8_t n = melosClusterVoices();
+  return log2f(centreHz[layout[n - 1][v < n ? v : n - 1]]);
+}
+
+// VOICING: the same note, moved by whole octaves into this voice's register.
+float melosPlaceInRegister(float logPitch, uint8_t v) {
+  if (!MELOS_VOICING) {
+    return logPitch;
+  }
+  return logPitch + roundf(melosRegisterCentre(v) - logPitch);
+}
+
+// JUST_TUNING: lean at most 40 cents toward the nearest just interval above
+// the bass voice (voice 0 sits in the lowest register).
+float melosJustTune(float logPitch, uint8_t v) {
+  if (!MELOS_JUST_TUNING || v == 0) {
+    return logPitch;
+  }
+  static const float justCents[] = {0.0f, 203.9f, 315.6f, 386.3f, 498.0f, 702.0f, 813.7f, 884.4f, 1017.6f, 1088.3f, 1200.0f};
+  const float above = (logPitch - melosClusterLog[0]) * 1200.0f;
+  const float inOctave = above - 1200.0f * floorf(above / 1200.0f);
+  float nearest = 0.0f;
+  for (float j : justCents) {
+    if (fabsf(j - inOctave) < fabsf(nearest - inOctave)) {
+      nearest = j;
+    }
+  }
+  const float pull = constrain((nearest - inOctave) * MELOS_JUST_PULL, -MELOS_JUST_MAX_CENTS, MELOS_JUST_MAX_CENTS);
+  return logPitch + pull / 1200.0f;
+}
+
+// The next note of voice v: a person of the archive, placed in this voice's
+// register; VOICE_LEADING prefers the nearest of a few candidates.
+float melosNextNote(uint8_t v) {
+  float best = melosPlaceInRegister(melosClusterPick(), v);
+  if (MELOS_VOICE_LEADING && (nextRandomU32() % 100UL) < MELOS_LEADING_STEP_PERCENT) {
+    for (uint8_t k = 1; k < MELOS_LEADING_CANDIDATES; ++k) {
+      const float candidate = melosPlaceInRegister(melosClusterPick(), v);
+      if (fabsf(candidate - melosClusterLog[v]) < fabsf(best - melosClusterLog[v])) {
+        best = candidate;
+      }
+    }
+  }
+  return melosJustTune(best, v);
+}
+
 // Vowel position (0 oo .. 1 ee) of a take from its 8-band spectrum.
 float bandsVowelPosition(const float bands[]) {
   float num = 0.0f, den = 0.0f;
@@ -652,7 +705,7 @@ void melosClusterEnter(float f0, float vowelPos) {
   melosEntryVowel = vowelPos;
   const uint32_t now = millis();
   for (uint8_t v = 0; v < MELOS_VOICE_COUNT; ++v) {
-    melosClusterTarget[v] = log2f(f0);
+    melosClusterTarget[v] = melosPlaceInRegister(log2f(f0), v);  // the new note in every register
     melosClusterTargetEntry[v] = true;
     melosVoiceStage[v] = 4;  // each voice in turn: quick fade, re-enter on this note
     melosVoiceStageMs[v] = now + randomRangeMs(0, MELOS_GATHER_START_MAX_MS);
@@ -666,7 +719,7 @@ void initMelosSynth() {
   melosSampleCounter = 0;
   melosF0 = constrain(expf(model.meanLogF0), F0_MIN_HZ, F0_MAX_HZ);
   for (uint8_t v = 0; v < MELOS_VOICE_COUNT; ++v) {
-    melosClusterLog[v] = melosArchivePitchCount > 0 ? melosClusterPick() : log2f(melosF0);
+    melosClusterLog[v] = melosArchivePitchCount > 0 ? melosPlaceInRegister(melosClusterPick(), v) : log2f(melosF0);
     melosClusterTarget[v] = melosClusterLog[v];
     melosClusterTargetEntry[v] = false;
     melosVoiceStage[v] = 0;

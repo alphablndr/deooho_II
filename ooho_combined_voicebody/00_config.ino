@@ -86,6 +86,21 @@ constexpr uint32_t MELOS_NOTE_BREATH_MAX_MS = 1500;
 // Anton: on a take ALL voices gather on its note and vowel within ~10 s (one
 // by one: quick fade out, re-enter on the new note), then leave one by one.
 constexpr uint32_t MELOS_GATHER_START_MAX_MS = 4000;
+// Musical moves on the choir (Anton 2026-10-15), each switchable:
+// VOICING - every voice has a register (a stack of fifths from E2) and a
+//   person's note is moved by whole octaves into it: still their note, but an
+//   open chord instead of a cluster around 110 Hz. Few voices use the middle.
+// JUST_TUNING - entering a note, a voice leans at most 40 cents toward the
+//   nearest just interval above the bass voice: the choir listens to itself.
+// VOICE_LEADING - a voice usually (70 %) moves to the nearest of 4 candidate
+//   people's notes, otherwise leaps: chords change by steps.
+constexpr bool MELOS_VOICING = true;
+constexpr bool MELOS_JUST_TUNING = true;
+constexpr bool MELOS_VOICE_LEADING = true;
+constexpr float MELOS_JUST_PULL = 0.6f;
+constexpr float MELOS_JUST_MAX_CENTS = 40.0f;
+constexpr uint8_t MELOS_LEADING_CANDIDATES = 4;
+constexpr uint8_t MELOS_LEADING_STEP_PERCENT = 70;
 constexpr float MELOS_GATHER_FADE_S = 1.8f;
 constexpr uint32_t MELOS_CLUSTER_GATHER_MS = 10000;
 constexpr uint32_t MELOS_CLUSTER_DISPERSE_MIN_MS = 2000;
@@ -543,6 +558,9 @@ uint8_t melosClusterVoices();
 void melosClusterEnter(float f0, float vowelPos);
 float bandsVowelPosition(const float bands[]);
 void melosVoiceFormantCoeffs(uint8_t v);
+float melosPlaceInRegister(float logPitch, uint8_t v);
+float melosJustTune(float logPitch, uint8_t v);
+float melosNextNote(uint8_t v);
 float melosNextSample();
 void feedMelosQueue();
 
