@@ -78,6 +78,18 @@ constexpr uint32_t MELOS_CLUSTER_HOP_MIN_MS = 10000;
 constexpr uint32_t MELOS_CLUSTER_HOP_MAX_MS = 30000;
 constexpr uint32_t MELOS_CLUSTER_ENTRY_MIN_MS = 30000;
 constexpr uint32_t MELOS_CLUSTER_ENTRY_MAX_MS = 60000;
+// Each choir voice has its own mouth (Pink Trombone logic). Its vowel keeps
+// morphing (Anton: never constant): a slow sweep of its own (12-35 s period)
+// around a centre that moves every 8-25 s, plus a small random walk. Its
+// breath morphs too: at every move a voice may turn whispered or voiced (as
+// often as the archive is whispered), gliding over ~4 s. Nasality,
+// speech-ghost and constrictions stay shared: the cube's one body moving.
+constexpr uint32_t MELOS_VOWEL_HOP_MIN_MS = 8000;
+constexpr uint32_t MELOS_VOWEL_HOP_MAX_MS = 25000;
+constexpr float MELOS_VOICE_VOWEL_WANDER = 0.12f;
+constexpr float MELOS_VOWEL_SWEEP = 0.22f;            // depth of each voice's own vowel sweep
+constexpr float MELOS_WHISPER_BREATH = 0.8f;
+constexpr float MELOS_BREATH_MORPH_EASE = 1.0f / (4.0f * SAMPLE_RATE);
 constexpr uint8_t MELOS_TRACT_SECTIONS = 3;
 
 // MELOS collective vocal body (variant A): source-formant-filter engine.
@@ -509,7 +521,9 @@ void loadMelosPitches();
 void clearMelosPitches();
 void appendMelosPitch(float f0);
 uint8_t melosClusterVoices();
-void melosClusterEnter(float f0);
+void melosClusterEnter(float f0, float vowelPos);
+float bandsVowelPosition(const float bands[]);
+void melosVoiceFormantCoeffs(uint8_t v);
 float melosNextSample();
 void feedMelosQueue();
 

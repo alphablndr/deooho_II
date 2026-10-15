@@ -188,10 +188,14 @@ void printDiagnostics() {
   Serial.print(melosArchivePitchCount);
   Serial.print(" pitches): ");
   for (uint8_t v = 0; v < (MELOS_CLUSTER && melosArchivePitchCount > 0 ? melosClusterVoices() : 0); ++v) {
+    static const char vowels[] = "uoaei";  // 0 oo .. 0.5 aa .. 1 ee
     Serial.print(exp2f(melosClusterLog[v]), 0);
+    Serial.print("Hz/");
+    Serial.print(vowels[constrain(static_cast<int>(melosVoiceVowel[v] * 4.0f + 0.5f), 0, 4)]);
+    Serial.print(melosVoiceBreath[v] > 0.5f ? "(whisper)" : "");
     Serial.print(melosClusterEntry[v] ? "* " : " ");
   }
-  Serial.println("Hz");
+  Serial.println("");
   Serial.print("  melos pitch now / last voice: ");
   Serial.print(melosF0, 1);
   Serial.print(" / ");

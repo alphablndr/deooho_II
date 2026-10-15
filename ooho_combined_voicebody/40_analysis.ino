@@ -396,7 +396,7 @@ void updateCollectiveModel() {
     model.bands[i] = model.bands[i] * (1.0f - MODEL_WEIGHT) + incomingBands[i] * MODEL_WEIGHT;
   }
   appendMelosPitch(medianF0);   // this person's note joins the MELOS choir
-  melosClusterEnter(medianF0);
+  melosClusterEnter(medianF0, bandsVowelPosition(incomingBands));
   triggerMelosLearnedGesture(medianF0, incomingVoicedRatio, incomingBands);
 
   Serial.print("Model update: voices=");

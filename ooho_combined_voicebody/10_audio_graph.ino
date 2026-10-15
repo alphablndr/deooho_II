@@ -210,6 +210,21 @@ float melosClusterLog[MELOS_VOICE_COUNT];           // current pitch per voice, 
 float melosClusterTarget[MELOS_VOICE_COUNT];        // person this voice is moving to, log2 Hz
 uint32_t melosClusterNextHopMs[MELOS_VOICE_COUNT];
 bool melosClusterEntry[MELOS_VOICE_COUNT];          // holding the new take's pitch
+float melosVoiceVowel[MELOS_VOICE_COUNT];           // own mouth: 0 oo .. 0.5 aa .. 1 ee
+float melosVoiceVowelCenter[MELOS_VOICE_COUNT];
+float melosVoiceVowelWander[MELOS_VOICE_COUNT];
+uint32_t melosVoiceVowelHopMs[MELOS_VOICE_COUNT];
+float melosVoiceBreath[MELOS_VOICE_COUNT];          // 0 voiced .. 0.8 whispering
+float melosVoiceBreathTarget[MELOS_VOICE_COUNT];
+float melosVoiceSweepHz[MELOS_VOICE_COUNT];         // own vowel sweep rate
+float melosVoiceSweepPhase[MELOS_VOICE_COUNT];
+float melosVoiceFormantFreq[MELOS_VOICE_COUNT][3];
+float melosVoiceFormantA1[MELOS_VOICE_COUNT][3];
+float melosVoiceFormantA2[MELOS_VOICE_COUNT][3];
+float melosVoiceFormantA3[MELOS_VOICE_COUNT][3];
+float melosVoiceFormantS1[MELOS_VOICE_COUNT][3];
+float melosVoiceFormantS2[MELOS_VOICE_COUNT][3];
+float melosEntryVowel = 0.5f;                       // vowel of the newest take
 float melosVoiceOffset[MELOS_VOICE_COUNT];        // current detune, semitones
 float melosVoiceOffsetTarget[MELOS_VOICE_COUNT];
 float melosVoiceJitter[MELOS_VOICE_COUNT];        // constant humanizing detune, cents
