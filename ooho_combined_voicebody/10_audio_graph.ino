@@ -19,6 +19,17 @@ struct MasterBiquad {
     a1 = (-2.0f * c) / a0;
     a2 = (1.0f - alpha) / a0;
   }
+  void setLowpass(float fc, float q) {
+    const float w0 = 2.0f * PI * fc / SAMPLE_RATE;
+    const float c = cosf(w0), s = sinf(w0);
+    const float alpha = s / (2.0f * q);
+    const float a0 = 1.0f + alpha;
+    b0 = (1.0f - c) * 0.5f / a0;
+    b1 = (1.0f - c) / a0;
+    b2 = (1.0f - c) * 0.5f / a0;
+    a1 = (-2.0f * c) / a0;
+    a2 = (1.0f - alpha) / a0;
+  }
   void setPeaking(float fc, float q, float dB) {
     const float A = powf(10.0f, dB / 40.0f);
     const float w0 = 2.0f * PI * fc / SAMPLE_RATE;
@@ -135,6 +146,7 @@ uint8_t logosDensityMode = LOGOS_MODE_PRESENT;
 uint32_t logosDensitySwitchMs = 0;
 float logosActivity = LOGOS_SLEEP_LEVEL;  // how awake the crowd is (0..1)
 uint32_t logosActivityUpdatedMs = 0;
+uint32_t logosStormUntilMs = 0;  // short storm after a take runs until this time
 float logosDensityGainCur = 1.0f;  // smoothed bus gain, eased toward the mode target
 
 char currentFilename[13] = "W0000.WAV";

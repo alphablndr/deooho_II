@@ -37,7 +37,9 @@ void updateIdlePlayback() {
     }
 
     // New grains only start while idle (a grain start does a bulk SD read).
-    if (state == IDLE && grainCount > 0 && !stream.playing && static_cast<int32_t>(now - stream.nextEventMs) >= 0) {
+    const bool stormRests = logosStormActive() && i >= logosStormStreams();  // small archive: fewer streams
+    if (state == IDLE && grainCount > 0 && !stream.playing && !stormRests &&
+        static_cast<int32_t>(now - stream.nextEventMs) >= 0) {
       GrainInfo grain;
       // On failure wait for the next scheduled slot instead of retrying the
       // SD card on every loop() pass.
@@ -411,9 +413,12 @@ void setup() {
 
   // Mastering EQ per transducer + soft limiter.
   // LOGOS -> internal speaker: clear low mud, lift presence for word clarity.
-  masterL.stage[0].setHighpass(90.0f, 0.707f);
+  // Voice band (Anton 2026-10-15): from 70 Hz (keeps low fundamentals) to
+  // 12 kHz (above it there is only hiss).
+  masterL.stage[0].setHighpass(70.0f, 0.707f);
   masterL.stage[1].setPeaking(3000.0f, 1.0f, 2.5f);
-  masterL.stages = 2;
+  masterL.stage[2].setLowpass(12000.0f, 0.707f);
+  masterL.stages = 3;
   masterL.ceiling = 0.92f;
   // MELOS -> 31 cm / 1.5 mm steel cube exciter. The metallic ring is WANTED
   // (the cube is the instrument), so we do NOT tame 2-6 kHz. Only a protective

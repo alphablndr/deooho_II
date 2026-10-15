@@ -401,6 +401,7 @@ void stopRecording() {
       sdFailureStreak = 0;  // a clean take: the card is fine
     }
     wakeLogos();
+    startLogosStorm();
     if (firstTake && !archiveEmpty()) {
       setOutputLevel(1.0f, FIRST_WAKE_SECONDS);  // the very first voice wakes the cube
     }

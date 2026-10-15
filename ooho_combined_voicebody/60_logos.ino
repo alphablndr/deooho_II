@@ -49,6 +49,27 @@ void wakeLogos() {
   logosDensitySwitchMs = 0;
 }
 
+bool logosStormActive() {
+  return logosStormUntilMs != 0 && static_cast<int32_t>(millis() - logosStormUntilMs) < 0;
+}
+
+uint8_t logosStormStreams() {
+  const uint32_t n = archiveRecordings();
+  return n < 10 ? 1 : n < 30 ? 2 : n < 80 ? 3 : 4;
+}
+
+void startLogosStorm() {
+  const uint32_t now = millis();
+  logosStormUntilMs = now + randomRangeMs(LOGOS_STORM_MIN_MS, LOGOS_STORM_MAX_MS);
+  for (uint8_t i = 0; i < LOGOS_STREAM_COUNT; ++i) {
+    logosStreams[i].nextEventMs = now + randomRangeMs(0, 250);
+  }
+  Serial.print("LOGOS storm: ");
+  Serial.print(logosStormUntilMs - now);
+  Serial.print(" ms, streams ");
+  Serial.println(logosStormStreams());
+}
+
 // 0..100. Every LOGOS density decision reads this: gaps, voices per cloud,
 // density mode, dormant streams.
 uint8_t logosArchivePressure() {
@@ -224,6 +245,10 @@ uint32_t logosRoleDurationMs(uint8_t index, uint32_t availableMs) {
 }
 
 void scheduleLogosStream(LogosStream &stream, uint8_t index) {
+  if (logosStormActive()) {  // fast pulse while the storm lasts
+    stream.nextEventMs = millis() + randomRangeMs(LOGOS_STORM_MIN_INTERVAL_MS, LOGOS_STORM_MAX_INTERVAL_MS);
+    return;
+  }
   if (index == 0) {
     if (logosDensityMode == LOGOS_MODE_SWARM) {
       stream.nextEventMs = millis() + archiveScaledInterval(520, 1900, LOGOS_ARCHIVE_SWARM_INTERVAL_REDUCTION);
@@ -477,6 +502,16 @@ bool selectRandomGrainFromIndex(GrainInfo &grain) {
   grainCount = grainIndexCount;
   if (recordingIndexCount == 0) {
     return false;
+  }
+  // Storm: the new voice multiplies - 40 % of fragments from the newest take.
+  if (logosStormActive() && (nextRandomU32() % 100UL) < LOGOS_STORM_NEW_TAKE_PERCENT) {
+    const RecordingEntry &newest = recordingIndex[recordingIndexCount - 1];
+    if (newest.file + 1U == nextIndex) {
+      const uint32_t index = pickGrainInRecording(newest);
+      grainFromIndex(index, grain);
+      rememberGrainIndex(index);
+      return true;
+    }
   }
   if ((nextRandomU32() % 100UL) < logosRecentBiasPercent() && selectRecentRecordingGrain(grain)) {
     return true;
@@ -814,8 +849,10 @@ bool startLogosGrain(uint8_t index, const GrainInfo &grain, uint32_t extraOffset
   }
   // Rare clear word. Otherwise every grain is deconstructed, so intelligible
   // whole words never slip through by accident.
-  const bool clearWord = launchMode == LOGOS_LAUNCH_AUTO && (nextRandomU32() % 100UL) < LOGOS_WORD_PERCENT;
-  const bool phraseGhost = !clearWord && !forcePhrase && launchMode == LOGOS_LAUNCH_AUTO && repeatEligible &&
+  // Storm: only short fragments (no clear words, phrases or clouds).
+  const bool storm = logosStormActive() && launchMode == LOGOS_LAUNCH_AUTO;
+  const bool clearWord = !storm && launchMode == LOGOS_LAUNCH_AUTO && (nextRandomU32() % 100UL) < LOGOS_WORD_PERCENT;
+  const bool phraseGhost = !storm && !clearWord && !forcePhrase && launchMode == LOGOS_LAUNCH_AUTO && repeatEligible &&
                            index > 0 && grain.durationMs >= LOGOS_MIN_DURATION_MS &&
                            (nextRandomU32() % 100UL) < LOGOS_PHRASE_GHOST_PERCENT;
   if (phraseGhost) {
@@ -825,7 +862,7 @@ bool startLogosGrain(uint8_t index, const GrainInfo &grain, uint32_t extraOffset
     playbackDurationMs = randomRangeMs(LOGOS_PHRASE_MIN_MS, LOGOS_PHRASE_MAX_MS);
   }
   stream.cloud = forcePhrase || phraseGhost ||
-                 (!clearWord && repeatEligible && availableDurationMs >= LOGOS_MIN_DURATION_MS &&
+                 (!storm && !clearWord && repeatEligible && availableDurationMs >= LOGOS_MIN_DURATION_MS &&
                   (nextRandomU32() % 100UL) < logosCloudChance(index));
   stream.granular = stream.cloud;
   if (forceResponse || forceTail) {
@@ -1000,10 +1037,15 @@ bool startLogosGrain(uint8_t index, const GrainInfo &grain, uint32_t extraOffset
       stream.voiceCount = 1;
     }
   } else {
-    const uint8_t reverseChance = index == 0 ? 18 : (index == 1 ? 58 : (index == 2 ? 40 : 32));
-    stream.reversed = (nextRandomU32() % 100UL) < reverseChance;
-    if ((nextRandomU32() % 100UL) < LOGOS_MUSICAL_RATE_PERCENT) {
-      stream.rate = logosRoleRate(index);
+    if (storm) {  // original speed, sometimes backwards
+      stream.reversed = (nextRandomU32() % 100UL) < LOGOS_STORM_REVERSE_PERCENT;
+      stream.rate = 1.0f;
+    } else {
+      const uint8_t reverseChance = index == 0 ? 18 : (index == 1 ? 58 : (index == 2 ? 40 : 32));
+      stream.reversed = (nextRandomU32() % 100UL) < reverseChance;
+      if ((nextRandomU32() % 100UL) < LOGOS_MUSICAL_RATE_PERCENT) {
+        stream.rate = logosRoleRate(index);
+      }
     }
     outputTotal = setupLogosVoice(stream, 0, 0, loaded, 0, stream.rate, stream.reversed);
     if (outputTotal > 0) {
@@ -1066,7 +1108,7 @@ void finishLogosGrain(uint8_t index) {
   // (Anton 2026-10-14). Grains fade themselves; an empty queue is silent.
 
   // Only re-trigger from SD while idle, to avoid SD reads during processing.
-  if (state == IDLE && wasClearWord && launchMode == LOGOS_LAUNCH_AUTO &&
+  if (state == IDLE && !logosStormActive() && wasClearWord && launchMode == LOGOS_LAUNCH_AUTO &&
       (nextRandomU32() % 100UL) < LOGOS_REVERSE_TAIL_CHANCE_PERCENT) {
     const uint32_t tailMs = randomRangeMs(LOGOS_REVERSE_TAIL_MIN_MS, min(LOGOS_REVERSE_TAIL_MAX_MS, stream.currentGrain.durationMs));
     if (stream.currentGrain.durationMs > tailMs + LOGOS_MIN_DURATION_MS) {
@@ -1076,7 +1118,7 @@ void finishLogosGrain(uint8_t index) {
       }
     }
   }
-  if (state == IDLE && stream.repeatEligible && (nextRandomU32() % 100UL) < LOGOS_REPEAT_CHANCE_PERCENT) {
+  if (state == IDLE && !logosStormActive() && stream.repeatEligible && (nextRandomU32() % 100UL) < LOGOS_REPEAT_CHANCE_PERCENT) {
     const uint32_t offset = randomRangeMs(LOGOS_REPEAT_MIN_OFFSET_MS, LOGOS_REPEAT_MAX_OFFSET_MS);
     if (stream.currentGrain.durationMs > offset + LOGOS_MIN_DURATION_MS) {
       if (startLogosGrain(index, stream.currentGrain, offset, false, LOGOS_LAUNCH_AUTO)) {

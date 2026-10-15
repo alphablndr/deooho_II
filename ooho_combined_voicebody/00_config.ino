@@ -132,6 +132,17 @@ constexpr uint32_t MELOS_MURMUR_MIN_MS = 18000;
 constexpr uint32_t MELOS_MURMUR_MAX_MS = 45000;
 
 constexpr uint8_t LOGOS_STREAM_COUNT = 4;
+// Short storm after every take (from the ooho_voices experiment, Anton
+// 2026-10-15): for ~5 s every new LOGOS grain is a short fragment on a fast
+// pulse, 40 % of them from the new take, original speed; then the usual
+// LOGOS takes over. Streams in the storm by archive size: <10 takes 1,
+// <30 2, <80 3, otherwise 4.
+constexpr uint32_t LOGOS_STORM_MIN_MS = 4000;
+constexpr uint32_t LOGOS_STORM_MAX_MS = 6000;
+constexpr uint32_t LOGOS_STORM_MIN_INTERVAL_MS = 110;
+constexpr uint32_t LOGOS_STORM_MAX_INTERVAL_MS = 220;
+constexpr uint8_t LOGOS_STORM_NEW_TAKE_PERCENT = 40;
+constexpr uint8_t LOGOS_STORM_REVERSE_PERCENT = 30;
 constexpr uint32_t LOGOS_STREAM_1_MIN_INTERVAL_MS = 1800;
 constexpr uint32_t LOGOS_STREAM_1_MAX_INTERVAL_MS = 5200;
 constexpr uint32_t LOGOS_DORMANT_MIN_INTERVAL_MS = 18000;
@@ -413,6 +424,9 @@ float logosFill();
 void updateLogosActivity();
 void wakeLogos();
 uint8_t logosArchivePressure();
+bool logosStormActive();
+uint8_t logosStormStreams();
+void startLogosStorm();
 const char *logosDensityModeName();
 void chooseLogosDensityMode();
 float musicalLogosRate(uint8_t index);
